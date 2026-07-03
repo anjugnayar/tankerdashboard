@@ -167,12 +167,11 @@
     </footer>
 
     <script>
-        // Data Store containing standard initial structured rows from 'Tanker dashboard.xlsx'
         let currentFleetData = [
           {"vessel": "Willows", "status": "Haldia", "activity": "Berthed", "loading_port": "Kochi", "loading_eta": "17-06-26/12:00", "ms_cargo": 0.0, "hsd_cargo": 0.0, "disport": "Pardeep", "disport_eta": "27-06-26/ 04:00", "remarks": "Delay at Kochi due to MT Swarna Mala (VC).", "next_voyage": "Kochi ETA 09-07-26 (9.6/30.7).", "lat": 22.0257, "lon": 88.0583},
           {"vessel": "Soprano Serene", "status": "To Paradeep", "activity": "Sailing", "loading_port": "Kochi", "loading_eta": "29-06-26/10:00", "ms_cargo": 5.4, "hsd_cargo": 34.5, "disport": "Paradeep", "disport_eta": "07-07-26/ 16:00", "remarks": "No operational alerts reported.", "next_voyage": "Kochi ETA 19-07-26 (5.5/34.5).", "lat": 20.2606, "lon": 86.6661},
           {"vessel": "Hari Leela", "status": "KCI", "activity": "Discharging", "loading_port": "MRPL", "loading_eta": "23-06-26/ 22:00", "ms_cargo": 11.9, "hsd_cargo": 26.8, "disport": "KCI", "disport_eta": "02-07-26/04:00", "remarks": "Delay at Mangalore due to Sanmar Sruthi.", "next_voyage": "Mangalore ETA Pending", "lat": 13.1492, "lon": 80.3273},
-          {"vessel": "Sanmar Santoor", "status": "To Kochi", "activity": "Sailing", "loading_port": "Kochi", "loading_eta": "05-07-26/ 15:00", "ms_cargo": 0.0, "hsd_cargo": 0.0, "disport": "KCI", "disport_eta": "2026-07-12 00:00:00", "remarks": "Vessel sailed from Ennore on 02-07-26 01:00.", "next_voyage": "TBD", "lat": 9.9520, "lon": 76.2505},
+          {"vessel": "Sanmar Santoor", "status": "To Kochi", "activity": "Sailing", "loading_port": "Kochi", "loading_eta": "05-07-26/ 15:00", "ms_cargo": 0.0, "hsd_cargo": 0.0, "disport": "KCI", "disport_eta": "2026-07-12 00:00:00", "remarks": "Vessel sailed from Ennore on 02-07-26 01:00.", "next_voyage": "Kochi ETA 09-07-26 (9.6/30.7).", "lat": 9.9520, "lon": 76.2505},
           {"vessel": "Marvels", "status": "Vizag", "activity": "Discharging", "loading_port": "Mangalore", "loading_eta": "18-06-26/ 11:00", "ms_cargo": 4.2, "hsd_cargo": 32.1, "disport": "Vizag", "disport_eta": "27-06-26/16:00", "remarks": "Delay at Mangalore due to MT Yasa Golden Dardanelles.", "next_voyage": "Kochi ETA 08-07-26 (5/34).", "lat": 17.6868, "lon": 83.2185},
           {"vessel": "Swarna Kalash", "status": "RIL", "activity": "Loading", "loading_port": "RIL", "loading_eta": "30-06-26/PM", "ms_cargo": 12.5, "hsd_cargo": 28.0, "disport": "Pipavav", "disport_eta": "2026-07-04 00:00:00", "remarks": "Loading plan changed in line with Pipavav displacement limitations.", "next_voyage": "RIL ETA", "lat": 22.4707, "lon": 69.6928},
           {"vessel": "Avyaan", "status": "Kandla", "activity": "Berthed", "loading_port": "NEL", "loading_eta": "22-06-26/ 14:30", "ms_cargo": 30.2, "hsd_cargo": 0.0, "disport": "Kandla", "disport_eta": "24-06-26/ PM", "remarks": "6-7 days waiting at Kandla terminal anchorage.", "next_voyage": "TBD", "lat": 23.0031, "lon": 70.2150},
@@ -181,7 +180,6 @@
           {"vessel": "Swarna Mala (VC)", "status": "Kochi", "activity": "Loading", "loading_port": "Kochi", "loading_eta": "01-07-26/ AM", "ms_cargo": 9.6, "hsd_cargo": 30.7, "disport": "Ennore", "disport_eta": "2026-07-07 00:00:00", "remarks": "Delay at Kochi due to MT Soprano Serene.", "next_voyage": "TBD", "lat": 9.9520, "lon": 76.2505}
         ];
 
-        // Known tracking port coordinates dictionary index
         const PORT_GEOLOCATIONS = {
             "Haldia": [22.0257, 88.0583], "Paradeep": [20.2606, 86.6661], "Pardeep": [20.2606, 86.6661],
             "Kochi": [9.9520, 76.2505], "Vizag": [17.6868, 83.2185], "Kandla": [23.0031, 70.2150],
@@ -189,6 +187,8 @@
             "KCI": [13.1492, 80.3273], "RIL": [22.4707, 69.6928], "Ennore": [13.2161, 80.3247], "Pipavav": [20.9161, 71.5034],
             "NEL": [22.2500, 69.5000]
         };
+
+        const DESIGNATED_LOAD_PORTS = ["mumbai", "kochi", "nel", "ril", "mrpl", "mangalore"];
 
         let map, markerLayerGroup;
 
@@ -200,7 +200,13 @@
             markerLayerGroup = L.layerGroup().addTo(map);
         }
 
-        function normalizeActivity(act) {
+        function normalizeActivity(act, msCargo = null, hsdCargo = null) {
+            if (msCargo !== null && hsdCargo !== null) {
+                const totalCargo = (parseFloat(msCargo) || 0) + (parseFloat(hsdCargo) || 0);
+                if (totalCargo === 0 && act.toLowerCase().includes('loading')) {
+                    return 'Loading'; 
+                }
+            }
             const low = act.toLowerCase();
             if (low.includes('sailing') || low.includes('sail')) return 'Sailing';
             if (low.includes('discharge') || low.includes('discharging')) return 'Discharging';
@@ -208,24 +214,24 @@
             return 'Berthed';
         }
 
-        function getActivityColorClass(act) {
-            const normalized = normalizeActivity(act);
+        function getActivityColorClass(act, ms, hsd) {
+            const normalized = normalizeActivity(act, ms, hsd);
             if (normalized === 'Sailing') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
             if (normalized === 'Discharging') return 'bg-blue-50 text-blue-700 border-blue-200';
             if (normalized === 'Loading') return 'bg-amber-50 text-amber-700 border-amber-200';
             return 'bg-red-50 text-red-700 border-red-200';
         }
 
-        function getPulseIndicatorClass(act) {
-            const normalized = normalizeActivity(act);
+        function getPulseIndicatorClass(act, ms, hsd) {
+            const normalized = normalizeActivity(act, ms, hsd);
             if (normalized === 'Sailing') return 'bg-emerald-500 indicator-sailing';
             if (normalized === 'Discharging') return 'bg-blue-500 indicator-discharging';
             if (normalized === 'Loading') return 'bg-amber-500 indicator-loading';
             return 'bg-red-500 indicator-berthed';
         }
 
-        function getMapLabelStyle(act) {
-            const normalized = normalizeActivity(act);
+        function getMapLabelStyle(act, ms, hsd) {
+            const normalized = normalizeActivity(act, ms, hsd);
             if (normalized === 'Sailing') return 'label-sailing';
             if (normalized === 'Discharging') return 'label-discharging';
             if (normalized === 'Loading') return 'label-loading';
@@ -239,7 +245,7 @@
         }
 
         function evaluateExtendedCargoMetrics(vesselObj) {
-            const normAct = normalizeActivity(vesselObj.activity);
+            const normAct = normalizeActivity(vesselObj.activity, vesselObj.ms_cargo, vesselObj.hsd_cargo);
             const totalCargo = (vesselObj.ms_cargo || 0) + (vesselObj.hsd_cargo || 0);
             
             let currentDischQty = totalCargo;
@@ -249,9 +255,17 @@
 
             let plannedDisport = vesselObj.disport || "TBD";
             let plannedQtyStr = "Volume Pending Allocation";
+            let isBallastSailing = false;
 
-            // Parse specific sub-allocations for active discharging units or sailing laden vessels
-            if (normAct === 'Discharging' || normAct === 'Sailing') {
+            const cleanStatus = (vesselObj.status || "").replace("To ", "").trim().toLowerCase();
+
+            if (normAct === 'Sailing' && totalCargo === 0) {
+                if (DESIGNATED_LOAD_PORTS.includes(cleanStatus)) {
+                    isBallastSailing = true;
+                }
+            }
+
+            if ((normAct === 'Discharging' || normAct === 'Sailing') && !isBallastSailing) {
                 const remarkStr = (vesselObj.remarks || "").toUpperCase();
                 const matches = [...remarkStr.matchAll(/\(([\d\.]+)\)/g)];
                 
@@ -269,21 +283,25 @@
                 }
             }
 
-            if (normAct === 'Loading') {
-                if (totalCargo > 0) {
+            if (normAct === 'Loading' || normAct === 'Berthed' || isBallastSailing) {
+                if (totalCargo > 0 && normAct === 'Loading') {
                     plannedQtyStr = `${vesselObj.ms_cargo} MS / ${vesselObj.hsd_cargo} HSD TMT`;
                 } else {
                     const planVoyageStr = vesselObj.next_voyage || "";
                     const planMatches = planVoyageStr.match(/\(([\d\.]+)\/([\d\.]+)[\)]?/);
                     if (planMatches) {
                         plannedQtyStr = `${planMatches[1]} MS / ${planMatches[2]} HSD TMT`;
+                    } else if (planVoyageStr && planVoyageStr !== "TBD" && planVoyageStr !== "RIL ETA") {
+                        plannedQtyStr = planVoyageStr;
                     } else {
-                        plannedQtyStr = "Awaiting Final Stowage Plan";
+                        plannedQtyStr = isBallastSailing 
+                            ? "Ballast: Turning Empty to Load (Volume Pending Allocation)"
+                            : "Awaiting Final Stowage / Port Clearance Plan";
                     }
                 }
             }
 
-            if (nextDischQty > 0) {
+            if (nextDischQty > 0 && !isBallastSailing) {
                 hasBalanceDisport = true;
                 const voyageStr = vesselObj.next_voyage || "";
                 const portMatch = voyageStr.match(/^([A-Za-z\s]+)\s+ETA/i);
@@ -298,12 +316,15 @@
 
             return {
                 totalCargo: totalCargo.toFixed(1),
+                msCargoStr: (vesselObj.ms_cargo || 0).toFixed(1),
+                hsdCargoStr: (vesselObj.hsd_cargo || 0).toFixed(1),
                 currentDischQty: currentDischQty.toFixed(1),
                 nextDischQty: nextDischQty.toFixed(1),
                 nextDisportName: nextDisportName,
                 hasBalanceDisport: hasBalanceDisport,
                 plannedDisport: plannedDisport,
-                plannedQtyStr: plannedQtyStr
+                plannedQtyStr: plannedQtyStr,
+                isBallastSailing: isBallastSailing
             };
         }
 
@@ -315,7 +336,7 @@
             markerLayerGroup.clearLayers();
 
             let filtered = currentFleetData.filter(v => {
-                const normAct = normalizeActivity(v.activity);
+                const normAct = normalizeActivity(v.activity, v.ms_cargo, v.hsd_cargo);
                 if (activityFilter !== "All" && normAct !== activityFilter) return false;
                 
                 if (searchQuery !== "") {
@@ -327,18 +348,16 @@
                 return true;
             });
 
-            // Dynamically calculate explicit dashboard tab metrics from total underlying raw sheet
             document.getElementById('fleetCount').innerText = `${currentFleetData.length} Vessels`;
             
-            const totalDischargingCount = currentFleetData.filter(v => normalizeActivity(v.activity) === 'Discharging').length;
-            const totalLoadingCount = currentFleetData.filter(v => normalizeActivity(v.activity) === 'Loading').length;
+            const totalDischargingCount = currentFleetData.filter(v => normalizeActivity(v.activity, v.ms_cargo, v.hsd_cargo) === 'Discharging').length;
+            const totalLoadingCount = currentFleetData.filter(v => normalizeActivity(v.activity, v.ms_cargo, v.hsd_cargo) === 'Loading').length;
             
             document.getElementById('dischCountBadge').innerText = totalDischargingCount;
             document.getElementById('loadCountBadge').innerText = totalLoadingCount;
 
-            // Calculate dynamic geometric positions before clustering 
             filtered.forEach(v => {
-                const normAct = normalizeActivity(v.activity);
+                const normAct = normalizeActivity(v.activity, v.ms_cargo, v.hsd_cargo);
                 let destCoord = getPortCoordinate(v.status) || getPortCoordinate(v.disport) || [16.0, 78.0];
                 let originCoord = getPortCoordinate(v.loading_port);
 
@@ -353,7 +372,6 @@
                 }
             });
 
-            // Group by coordinates to handle radial spacing spider updates
             const coordinateGroups = {};
             filtered.forEach(v => {
                 const baseKey = `${v.calculatedLat.toFixed(3)}_${v.calculatedLon.toFixed(3)}`;
@@ -378,8 +396,9 @@
                         finalLon += baseDistance * Math.cos(angle) * 1.2;
                     }
 
-                    const cssPulse = getPulseIndicatorClass(v.activity);
-                    const colorHex = normalizeActivity(v.activity) === 'Sailing' ? '#10b981' : (normalizeActivity(v.activity) === 'Discharging' ? '#3b82f6' : (normalizeActivity(v.activity) === 'Loading' ? '#f59e0b' : '#ef4444'));
+                    const cssPulse = getPulseIndicatorClass(v.activity, v.ms_cargo, v.hsd_cargo);
+                    const normAct = normalizeActivity(v.activity, v.ms_cargo, v.hsd_cargo);
+                    const colorHex = normAct === 'Sailing' ? '#10b981' : (normAct === 'Discharging' ? '#3b82f6' : (normAct === 'Loading' ? '#f59e0b' : '#ef4444'));
                     
                     const customMarkerHtml = `
                         <div style="position: relative; width: 14px; height: 14px;">
@@ -393,21 +412,20 @@
                         iconAnchor: [7, 7]
                     });
 
-                    const normAct = normalizeActivity(v.activity);
                     const cargoMetrics = evaluateExtendedCargoMetrics(v);
                     
                     let dynamicCargoHtml = '';
-                    if (normAct === 'Loading' || normAct === 'Discharging' || (normAct === 'Sailing' && parseFloat(cargoMetrics.totalCargo) > 0)) {
-                        dynamicCargoHtml += `<div class="text-[11px] text-purple-800 font-bold mt-1 bg-purple-50 p-1.5 rounded border border-purple-100">`;
-                        if (normAct === 'Discharging' || normAct === 'Sailing') {
-                            dynamicCargoHtml += `📦 Cargo On-Board: ${cargoMetrics.totalCargo} TMT`;
+                    if (cargoMetrics.isBallastSailing || normAct === 'Loading' || normAct === 'Berthed' || normAct === 'Discharging' || (normAct === 'Sailing' && parseFloat(cargoMetrics.totalCargo) > 0)) {
+                        dynamicCargoHtml += `<div class="text-[11px] text-purple-800 font-bold mt-1 bg-purple-50 p-1.5 rounded border border-purple-100 font-sans">`;
+                        if ((normAct === 'Discharging' || normAct === 'Sailing') && !cargoMetrics.isBallastSailing) {
+                            dynamicCargoHtml += `📦 Cargo: ${cargoMetrics.totalCargo} TMT <span class="text-[10px] text-purple-600 font-normal">(${cargoMetrics.msCargoStr} MS / ${cargoMetrics.hsdCargoStr} HSD)</span>`;
                             if (normAct === 'Discharging') {
                                 dynamicCargoHtml += `<br>📉 Disch Qty at ${v.status}: ${cargoMetrics.currentDischQty} TMT`;
                             } else {
                                 dynamicCargoHtml += `<br>➡️ Bound For: ${v.disport} (ETA: ${v.disport_eta})`;
                             }
-                        } else if (normAct === 'Loading') {
-                            dynamicCargoHtml += `📋 Planned Load Qty: <span class="text-amber-700">${cargoMetrics.plannedQtyStr}</span>`;
+                        } else {
+                            dynamicCargoHtml += `📋 Planned Load Qty: <span class="text-amber-700 font-black">${cargoMetrics.plannedQtyStr}</span>`;
                         }
                         dynamicCargoHtml += `</div>`;
                     }
@@ -415,7 +433,7 @@
                     const infoPopupHtml = `
                         <div class="p-2 font-sans space-y-1 text-slate-800 leading-tight">
                             <div class="font-black text-sm border-b border-slate-200 pb-1 flex items-center gap-1.5 text-slate-900">🚢 ${v.vessel}</div>
-                            <div class="text-[11px] mt-1"><b>Status Node:</b> ${v.status} (${normAct})</div>
+                            <div class="text-[11px] mt-1"><b>Status Node:</b> ${v.status} (${cargoMetrics.isBallastSailing ? 'Sailing (Ballast)' : normAct})</div>
                             <div class="text-[11px] text-emerald-700"><b>Load Port:</b> ${v.loading_port} (ETA: ${v.loading_eta})</div>
                             <div class="text-[11px] text-blue-700"><b>Current Disport:</b> ${v.disport} (ETA: ${v.disport_eta})</div>
                             ${dynamicCargoHtml}
@@ -425,7 +443,7 @@
                     const mapMarker = L.marker([finalLat, finalLon], { icon: customIcon }).addTo(markerLayerGroup);
                     mapMarker.bindTooltip(infoPopupHtml, { permanent: false, direction: 'top', opacity: 0.98 });
 
-                    const labelStyleClass = getMapLabelStyle(v.activity);
+                    const labelStyleClass = getMapLabelStyle(v.activity, v.ms_cargo, v.hsd_cargo);
                     const textLabelMarker = L.marker([finalLat, finalLon], {
                         icon: L.divIcon({
                             className: `vessel-map-label ${labelStyleClass}`,
@@ -443,7 +461,7 @@
             if (groupingOption === 'grouped') {
                 const groups = { 'Sailing': [], 'Discharging': [], 'Loading': [], 'Berthed': [] };
                 filtered.forEach(v => {
-                    const groupKey = normalizeActivity(v.activity);
+                    const groupKey = normalizeActivity(v.activity, v.ms_cargo, v.hsd_cargo);
                     groups[groupKey].push(v);
                 });
 
@@ -480,20 +498,23 @@
         }
 
         function generateCardHtml(v) {
-            const cssPulse = getPulseIndicatorClass(v.activity);
-            const colorHex = normalizeActivity(v.activity) === 'Sailing' ? '#10b981' : (normalizeActivity(v.activity) === 'Discharging' ? '#3b82f6' : (normalizeActivity(v.activity) === 'Loading' ? '#f59e0b' : '#ef4444'));
-            const normAct = normalizeActivity(v.activity);
+            const cssPulse = getPulseIndicatorClass(v.activity, v.ms_cargo, v.hsd_cargo);
+            const normAct = normalizeActivity(v.activity, v.ms_cargo, v.hsd_cargo);
+            const colorHex = normAct === 'Sailing' ? '#10b981' : (normAct === 'Discharging' ? '#3b82f6' : (normAct === 'Loading' ? '#f59e0b' : '#ef4444'));
             const cargoMetrics = evaluateExtendedCargoMetrics(v);
 
             let cargoContextSection = '';
             
-            // Check if vessel is active discharging OR sailing with actual cargo onboard
-            if (normAct === 'Discharging' || (normAct === 'Sailing' && parseFloat(cargoMetrics.totalCargo) > 0)) {
+            if ((normAct === 'Discharging' || normAct === 'Sailing') && !cargoMetrics.isBallastSailing) {
                 cargoContextSection = `
                     <div class="bg-purple-50/70 border border-purple-100 p-2.5 rounded-lg text-[11px] space-y-1.5">
-                        <div class="flex justify-between text-purple-900 font-bold">
-                            <span>📦 Total Cargo On-Board:</span>
-                            <span>${cargoMetrics.totalCargo} TMT</span>
+                        <div class="flex justify-between items-center text-purple-900 font-bold">
+                            <span>📦 Cargo On-Board Matrix:</span>
+                            <span class="text-purple-950">${cargoMetrics.totalCargo} TMT</span>
+                        </div>
+                        <div class="flex justify-start gap-4 font-semibold text-[10px] text-purple-700 bg-purple-100/50 p-1 px-2 rounded">
+                            <span>⛽ MS: <span class="font-bold">${cargoMetrics.msCargoStr} TMT</span></span>
+                            <span>🚚 HSD: <span class="font-bold">${cargoMetrics.hsdCargoStr} TMT</span></span>
                         </div>
                         <div class="flex justify-between text-slate-600 text-[10px] border-t border-purple-100/60 pt-1">
                             <span>📍 Primary Destination Disport:</span>
@@ -507,15 +528,15 @@
                         ` : ''}
                     </div>
                 `;
-            } else if (normAct === 'Loading') {
+            } else if (normAct === 'Loading' || normAct === 'Berthed' || cargoMetrics.isBallastSailing) {
                 cargoContextSection = `
                     <div class="bg-amber-50/70 border border-amber-200 p-2.5 rounded-lg text-[11px] space-y-1">
                         <div class="text-amber-900 font-bold flex justify-between items-center">
-                            <span>📋 Planned Load Targets:</span>
-                            <span class="bg-amber-200/60 px-1.5 py-0.5 rounded text-[10px] text-amber-950 font-mono">STOWAGE PLAN</span>
+                            <span>📋 Upcoming Loading Target Vector:</span>
+                            <span class="bg-amber-200/60 px-1.5 py-0.5 rounded text-[10px] text-amber-950 font-mono font-bold">LOAD PLAN ACTIVE</span>
                         </div>
-                        <div class="text-slate-700 text-[10px] mt-0.5">
-                            📊 <strong>Target Allocation:</strong> ${cargoMetrics.plannedQtyStr}
+                        <div class="text-slate-800 text-[11px] mt-0.5 font-semibold">
+                            📊 Plan: <span class="text-amber-700 font-bold">${cargoMetrics.plannedQtyStr}</span>
                         </div>
                     </div>
                 `;
@@ -531,8 +552,8 @@
                                 <p class="text-[11px] text-slate-500">Node: <span class="text-slate-800 font-semibold">${v.status}</span></p>
                             </div>
                         </div>
-                        <span class="px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${getActivityColorClass(v.activity)}">
-                            ${normAct}
+                        <span class="px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${getActivityColorClass(v.activity, v.ms_cargo, v.hsd_cargo)}">
+                            ${cargoMetrics.isBallastSailing ? 'Sailing (Ballast)' : normAct}
                         </span>
                     </div>
                     
