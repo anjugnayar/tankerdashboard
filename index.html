@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Fleet Tanker Dashboard</title>
+    <!-- Tailwind CSS for high-end UI styling -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Leaflet Engine for Live Coastal Interactive Maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- SheetJS to parse Excel files completely locally inside the browser -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        #map { height: 450px; border-radius: 12px; z-index: 1; }
+        .vessel-card { transition: transform 0.15s ease-in-out; }
+        .vessel-card:hover { transform: translateY(-2px); }
+        
+        /* Custom pulsing animations for live visual indicators */
+        @keyframes pulse-green { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } }
+        @keyframes pulse-blue { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } }
+        @keyframes pulse-amber { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } }
+        @keyframes pulse-red { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } }
+        
+        .indicator-sailing { animation: pulse-green 2s infinite ease-in-out; }
+        .indicator-discharging { animation: pulse-blue 2s infinite ease-in-out; }
+        .indicator-loading { animation: pulse-amber 2s infinite ease-in-out; }
+        .indicator-berthed { animation: pulse-red 2s infinite ease-in-out; }
+
+        /* Custom Permanent Leaflet Labels styling */
+        .vessel-map-label {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(51, 65, 85, 0.8);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-weight: 700;
+            white-space: nowrap;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .label-sailing { color: #34d399; border-color: rgba(16, 185, 129, 0.4); }
+        .label-discharging { color: #60a5fa; border-color: rgba(59, 130, 246, 0.4); }
+        .label-loading { color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); }
+        .label-berthed { color: #f87171; border-color: rgba(239, 68, 68, 0.4); }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen">
+
+    <!-- Top Status Control Panel -->
+    <header class="border-b border-slate-800 bg-slate-950/50 backdrop-blur-md sticky top-0 z-[1000] px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+        <div>
+            <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">🚢 Fleet Tanker Command Dashboard</h1>
+            <p class="text-xs text-slate-400">Drop your daily Excel update to dynamically process visual tracking charts with live movement indicators.</p>
+        </div>
+        
+        <!-- Live File Drag & Drop Ingestion Handler -->
+        <div class="w-full sm:w-auto">
+            <label class="flex flex-col items-center justify-center border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-900 px-4 py-2 rounded-lg cursor-pointer transition-colors text-xs font-semibold text-slate-300 hover:text-white">
+                <span>📂 Upload Daily Excel Tracker File</span>
+                <input type="file" id="excelFile" accept=".xlsx, .xls" class="hidden" onchange="handleExcelUpload(event)" />
+            </label>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+
+        <!-- Metrics Row Box Layout -->
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div class="bg-slate-950 p-5 rounded-xl border border-slate-800 flex justify-between items-center">
+                <div>
+                    <p class="text-xs text-slate-400 font-medium uppercase tracking-wider">In Transit MS Total</p>
+                    <h3 id="msTotal" class="text-2xl font-black text-blue-400 mt-1">51.8 TMT</h3>
+                </div>
+                <div class="text-2xl opacity-80">🚛</div>
+            </div>
+            <div class="bg-slate-950 p-5 rounded-xl border border-slate-800 flex justify-between items-center">
+                <div>
+                    <p class="text-xs text-slate-400 font-medium uppercase tracking-wider">In Transit HSD Total</p>
+                    <h3 id="hsdTotal" class="text-2xl font-black text-amber-400 mt-1">113.2 TMT</h3>
+                </div>
+                <div class="text-2xl opacity-80">⛽</div>
+            </div>
+            <div class="bg-slate-950 p-5 rounded-xl border border-slate-800 flex justify-between items-center">
+                <div>
+                    <p class="text-xs text-slate-400 font-medium uppercase tracking-wider">Active Fleet Count</p>
+                    <h3 id="fleetCount" class="text-2xl font-black text-emerald-400 mt-1">10 Vessels</h3>
+                </div>
+                <div class="text-2xl opacity-80">🚢</div>
+            </div>
+        </section>
+
+        <!-- Legend and Map Section -->
+        <section class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+            <div class="flex flex-wrap justify-between items-center gap-4 border-b border-slate-800 pb-3">
+                <h2 class="text-sm font-semibold text-slate-300 flex items-center gap-2">🗺️ Live Fleet Spatial Tracking Map (Vessels Named & Pulse Coded)</h2>
+                <!-- Legend Indicators -->
+                <div class="flex flex-wrap items-center gap-4 text-xs">
+                    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block indicator-sailing"></span> <span class="text-slate-400">Sailing / In Transit</span></div>
+                    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-blue-400 inline-block indicator-discharging"></span> <span class="text-slate-400">Discharging</span></div>
+                    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block indicator-loading"></span> <span class="text-slate-400">Loading</span></div>
+                    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-red-400 inline-block indicator-berthed"></span> <span class="text-slate-400">Berthed / Port Stay</span></div>
+                </div>
+            </div>
+            <div id="map" class="bg-slate-900"></div>
+        </section>
+
+        <!-- Dynamic Data Grid Layout Viewports -->
+        <section class="space-y-4">
+            <div class="flex justify-between items-center">
+                <h2 class="text-sm font-semibold text-slate-300">📋 Filterable Vessel Status Matrix</h2>
+                <select id="activityFilter" onchange="applyFilters()" class="bg-slate-950 border border-slate-800 rounded-md px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500">
+                    <option value="All">All Activities</option>
+                    <option value="Sailing">Sailing</option>
+                    <option value="Discharging">Discharging</option>
+                    <option value="Loading">Loading</option>
+                    <option value="Berthed">Berthed</option>
+                </select>
+            </div>
+            <div id="vesselGrid" class="grid grid-cols-1 gap-4">
+                <!-- Dynamically generated vessel matrix items loaded via script mapping -->
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-slate-950 text-center py-6 border-t border-slate-800 text-xs text-slate-500">
+        Standalone Fleet Tracking Template Engine. Local Ingestion Framework.
+    </footer>
+
+    <script>
+        // Preset Initial State extracted directly from your current "Tanker dashboard.xlsx"
+        let currentFleetData = [
+          {"vessel": "Willows", "status": "Haldia", "activity": "Will sail out soon.", "loading_port": "Kochi", "loading_eta": "17-06-26/12:00", "ms_cargo": 0.0, "hsd_cargo": 0.0, "disport": "Pardeep", "disport_eta": "27-06-26/ 04:00", "remarks": "Delay at Kochi due to MT Swarna Mala (VC).", "next_voyage": "Kochi ETA 09-07-26 (9.6/30.7).", "lat": 22.0257, "lon": 88.0583},
+          {"vessel": "Soprano Serene", "status": "To Paradeep", "activity": "Sailing", "loading_port": "Kochi", "loading_eta": "29-06-26/10:00", "ms_cargo": 5.4, "hsd_cargo": 34.5, "disport": "Paradeep", "disport_eta": "07-07-26/ 16:00", "remarks": "No operational alerts reported.", "next_voyage": "Kochi ETA 19-07-26 (5.5/34.5).", "lat": 20.2606, "lon": 86.6661},
+          {"vessel": "Hari Leela", "status": "KCI", "activity": "Discharging", "loading_port": "MRPL", "loading_eta": "23-06-26/ 22:00", "ms_cargo": 11.9, "hsd_cargo": 26.8, "disport": "KCI", "disport_eta": "02-07-26/04:00", "remarks": "Delay at Mangalore due to Sanmar Sruthi.", "next_voyage": "Mangalore ETA Pending", "lat": 13.1492, "lon": 80.3273},
+          {"vessel": "Sanmar Santoor", "status": "To Kochi", "activity": "Sailing", "loading_port": "Kochi", "loading_eta": "05-07-26/ 15:00", "ms_cargo": 0.0, "hsd_cargo": 0.0, "disport": "KCI", "disport_eta": "2026-07-12 00:00:00", "remarks": "Vessel sailed from Ennore on 02-07-26 01:00.", "next_voyage": "TBD", "lat": 9.9520, "lon": 76.2505},
+          {"vessel": "Marvels", "status": "Vizag", "activity": "Discharging", "loading_port": "Mangalore", "loading_eta": "18-06-26/ 11:00", "ms_cargo": 4.2, "hsd_cargo": 32.1, "disport": "Vizag", "disport_eta": "27-06-26/16:00", "remarks": "Delay at Mangalore due to MT Yasa Golden Dardanelles.", "next_voyage": "Kochi ETA 08-07-26 (5/34).", "lat": 17.6868, "lon": 83.2185},
+          {"vessel": "Swarna Kalash", "status": "RIL", "activity": "Loading", "loading_port": "RIL", "loading_eta": "30-06-26/PM", "ms_cargo": 0.0, "hsd_cargo": 0.0, "disport": "Pipavav", "disport_eta": "2026-07-04 00:00:00", "remarks": "Loading plan changed in line with Pipavav displacement limitations.", "next_voyage": "RIL ETA", "lat": 22.4707, "lon": 69.6928},
+          {"vessel": "Avyaan", "status": "Kandla", "activity": "Berthed", "loading_port": "NEL", "loading_eta": "22-06-26/ 14:30", "ms_cargo": 30.2, "hsd_cargo": 0.0, "disport": "Kandla", "disport_eta": "24-06-26/ PM", "remarks": "6-7 days waiting at Kandla terminal anchorage.", "next_voyage": "TBD", "lat": 23.0031, "lon": 70.2150},
+          {"vessel": "Shanaya", "status": "Kandla", "activity": "Sailed out", "loading_port": "NEL", "loading_eta": "25-06-26/ PM", "ms_cargo": 0.0, "hsd_cargo": 0.0, "disport": "Kandla", "disport_eta": "28-06-26/ 05:00", "remarks": "Vessel anchored at OTB.", "next_voyage": "TBD", "lat": 23.0031, "lon": 70.2150},
+          {"vessel": "Ishaan", "status": "Mumbai", "activity": "Discharging", "loading_port": "NEL", "loading_eta": "2026-06-24 00:00:00", "ms_cargo": 0.0, "hsd_cargo": 19.9, "disport": "Mumbai", "disport_eta": "01-07-26/ AM", "remarks": "Vessel carrying both BPCL (19.9) & HPCL (14.9) cargoes.", "next_voyage": "TBD", "lat": 18.9524, "lon": 72.8190},
+          {"vessel": "Swarna Mala (VC)", "status": "Kochi", "activity": "Loading", "loading_port": "Kochi", "loading_eta": "01-07-26/ AM", "ms_cargo": 0.0, "hsd_cargo": 0.0, "disport": "Ennore", "disport_eta": "2026-07-07 00:00:00", "remarks": "Delay at Kochi due to MT Soprano Serene.", "next_voyage": "TBD", "lat": 9.9520, "lon": 76.2505}
+        ];
+
+        // Known tracking port coordinates dictionary index (adding tiny offsets so multi-vessel ports don't clip completely)
+        const PORT_GEOLOCATIONS = {
+            "Haldia": [22.0257, 88.0583], "Paradeep": [20.2606, 86.6661], "Pardeep": [20.2606, 86.6661],
+            "Kochi": [9.9520, 76.2505], "Vizag": [17.6868, 83.2185], "Kandla": [23.0031, 70.2150],
+            "Mumbai": [18.9524, 72.8190], "MRPL": [12.9405, 74.8184], "Mangalore": [12.9405, 74.8184],
+            "KCI": [13.1492, 80.3273], "RIL": [22.4707, 69.6928], "Ennore": [13.2161, 80.3247], "Pipavav": [20.9161, 71.5034]
+        };
+
+        let map, markerLayerGroup;
+
+        // Initialize spatial map viewports
+        function initDashboardMap() {
+            map = L.map('map').setView([18.5, 79.5], 5);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '©OpenStreetMap ©CartoDB'
+            }).addTo(map);
+            markerLayerGroup = L.layerGroup().addTo(map);
+        }
+
+        // Color coding activity indicators
+        function getActivityColorClass(act) {
+            const low = act.toLowerCase();
+            if(low.includes('sailing') || low.includes('sail')) return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+            if(low.includes('discharge') || low.includes('discharging')) return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+            if(low.includes('loading')) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+            return 'bg-red-500/10 text-red-400 border-red-500/20';
+        }
+
+        function getPulseIndicatorClass(act) {
+            const low = act.toLowerCase();
+            if(low.includes('sailing') || low.includes('sail')) return 'bg-emerald-400 indicator-sailing';
+            if(low.includes('discharge') || low.includes('discharging')) return 'bg-blue-400 indicator-discharging';
+            if(low.includes('loading')) return 'bg-amber-400 indicator-loading';
+            return 'bg-red-400 indicator-berthed';
+        }
+
+        function getMapLabelStyle(act) {
+            const low = act.toLowerCase();
+            if(low.includes('sailing') || low.includes('sail')) return 'label-sailing';
+            if(low.includes('discharge') || low.includes('discharging')) return 'label-discharging';
+            if(low.includes('loading')) return 'label-loading';
+            return 'label-berthed';
+        }
+
+        // Parse coordinates from string labels safely
+        function estimateCoordinate(statusString) {
+            let cleaner = statusString.replace("To ", "").trim();
+            return PORT_GEOLOCATIONS[cleaner] || [16.0, 78.0];
+        }
+
+        // Render dashboard grid and map markers
+        function renderDashboardView(fleet) {
+            const grid = document.getElementById('vesselGrid');
+            grid.innerHTML = '';
+            markerLayerGroup.clearLayers();
+
+            document.getElementById('fleetCount').innerText = `${fleet.length} Vessels`;
+
+            // Track port counts to apply small offsets preventing overlapping vessel markers
+            const portCounts = {};
+
+            fleet.forEach(v => {
+                let baseLat = v.lat;
+                let baseLon = v.lon;
+                const portKey = `${baseLat.toFixed(2)}_${baseLon.toFixed(2)}`;
+                
+                if (portCounts[portKey]) {
+                    baseLat += (portCounts[portKey] * 0.18); // Stagger markers slightly if multiple ships are at same port
+                    baseLon += (portCounts[portKey] * 0.15);
+                    portCounts[portKey]++;
+                } else {
+                    portCounts[portKey] = 1;
+                }
+
+                // Map Marker Icon Generation via HTML/CSS pulses
+                const cssClass = getPulseIndicatorClass(v.activity);
+                const colorHex = v.activity.includes('Sailing') ? '#34d399' : (v.activity.includes('Discharging') ? '#60a5fa' : (v.activity.includes('Loading') ? '#fbbf24' : '#f87171'));
+                
+                const customMarkerHtml = `
+                    <div style="position: relative; width: 14px; height: 14px;">
+                        <span class="w-3.5 h-3.5 rounded-full ${cssClass} block absolute top-0 left-0" style="background-color: ${colorHex}; box-shadow: 0 0 8px ${colorHex};"></span>
+                    </div>`;
+
+                const customIcon = L.divIcon({
+                    html: customMarkerHtml,
+                    className: '',
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7]
+                });
+
+                // Add the pulsing point icon
+                L.marker([baseLat, baseLon], { icon: customIcon }).addTo(markerLayerGroup)
+                  .bindPopup(`
+                    <div class="text-slate-900 font-sans p-1">
+                        <strong class="text-sm block">🚢 ${v.vessel}</strong>
+                        <span class="text-xs text-slate-600 mt-1 block"><b>Status:</b> ${v.status} (${v.activity})</span>
+                        <span class="text-xs text-slate-600 block"><b>On Board:</b> MS: ${v.ms_cargo} TMT | HSD: ${v.hsd_cargo} TMT</span>
+                    </div>
+                  `);
+
+                // Dynamic Named Label Overlay attached permanently to map surface
+                const labelStyleClass = getMapLabelStyle(v.activity);
+                L.marker([baseLat, baseLon], {
+                    icon: L.divIcon({
+                        className: `vessel-map-label ${labelStyleClass}`,
+                        html: v.vessel,
+                        iconAnchor: [-10, 8]
+                    })
+                }).addTo(markerLayerGroup);
+
+                // Matrix Grid Card Rendering
+                const el = document.createElement('div');
+                el.className = "vessel-card bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-4";
+                el.innerHTML = `
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                        <div class="flex items-center gap-3">
+                            <!-- Color coordinated pulsing live dot indicator directly next to vessel name -->
+                            <span class="w-3 h-3 rounded-full inline-block ${cssClass}" style="background-color: ${colorHex}; box-shadow: 0 0 6px ${colorHex};"></span>
+                            <div>
+                                <h3 class="text-base font-bold text-white flex items-center gap-2">${v.vessel}</h3>
+                                <p class="text-xs text-slate-400">Current Tracking Node: <span class="text-slate-200 font-medium">${v.status}</span></p>
+                            </div>
+                        </div>
+                        <span class="px-2.5 py-1 rounded border text-xs font-medium uppercase ${getActivityColorClass(v.activity)}">
+                            ${v.activity}
+                        </span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+                        <div class="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                            <span class="text-slate-500 block uppercase font-mono tracking-wider text-[10px]">Loading Origin</span>
+                            <span class="text-slate-200 block mt-1 font-semibold">📍 ${v.loading_port}</span>
+                            <span class="text-slate-400 block mt-0.5">📅 ETA: ${v.loading_eta}</span>
+                        </div>
+                        <div class="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                            <span class="text-slate-500 block uppercase font-mono tracking-wider text-[10px]">Cargo Load State</span>
+                            <span class="text-blue-400 block mt-1 font-semibold">🚛 MS: ${v.ms_cargo} TMT</span>
+                            <span class="text-amber-400 block font-semibold">⛽ HSD: ${v.hsd_cargo} TMT</span>
+                        </div>
+                        <div class="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                            <span class="text-slate-500 block uppercase font-mono tracking-wider text-[10px]">Disport Destination</span>
+                            <span class="text-slate-200 block mt-1 font-semibold">📍 ${v.disport}</span>
+                            <span class="text-slate-400 block mt-0.5">📅 ETA: ${v.disport_eta}</span>
+                        </div>
+                        <div class="bg-slate-900/50 p-3 rounded-lg border border-slate-800/50">
+                            <span class="text-slate-500 block uppercase font-mono tracking-wider text-[10px]">Next Voyage Plan</span>
+                            <span class="text-slate-300 block mt-1 italic font-medium">${v.next_voyage}</span>
+                        </div>
+                    </div>
+                    ${v.remarks && v.remarks !== "No alerts" && v.remarks !== "No operational alerts reported." ? `
+                        <div class="bg-red-950/30 border border-red-900/40 text-red-400 p-2.5 rounded-lg text-xs">
+                            🚨 <strong>Alert Notification:</strong> ${v.remarks}
+                        </div>
+                    ` : ''}
+                `;
+                grid.appendChild(el);
+            });
+        }
+
+        function applyFilters() {
+            const filter = document.getElementById('activityFilter').value;
+            if (filter === "All") {
+                renderDashboardView(currentFleetData);
+            } else {
+                const matches = currentFleetData.filter(v => v.activity.toLowerCase().includes(filter.toLowerCase()));
+                renderDashboardView(matches);
+            }
+        }
+
+        // SheetJS Native Excel Processing Core Parser Engine
+        function handleExcelUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                
+                if (matrix[0]) {
+                    const rowStr = matrix[0].join(" ");
+                    const msMatch = rowStr.match(/([\d\.]+)\s*MS/);
+                    const hsdMatch = rowStr.match(/([\d\.]+)\s*HSD/);
+                    if (msMatch) document.getElementById('msTotal').innerText = msMatch[0] + " TMT";
+                    if (hsdMatch) document.getElementById('hsdTotal').innerText = hsdMatch[0] + " TMT";
+                }
+
+                let parsedFleet = [];
+                let rowCount = matrix.length;
+                if (rowCount > 4) {
+                    let vesselRow = matrix[1];
+                    for (let colIdx = 2; colIdx < vesselRow.length; colIdx++) {
+                        let name = vesselRow[colIdx];
+                        if (name && name.toString().trim() !== "") {
+                            let vName = name.toString().trim();
+                            
+                            let status = matrix[3] ? (matrix[3][colIdx] || "TBD") : "TBD";
+                            let activity = matrix[4] ? (matrix[4][colIdx] || "N/A") : "N/A";
+                            let loadPort = matrix[6] ? (matrix[6][colIdx] || "N/A") : "N/A";
+                            let loadEta = matrix[7] ? (matrix[7][colIdx] || "N/A") : "N/A";
+                            
+                            let msVal = matrix[15] ? parseFloat(matrix[15][colIdx] || 0) : 0;
+                            let hsdVal = matrix[16] ? parseFloat(matrix[16][colIdx] || 0) : 0;
+                            
+                            let disport = matrix[18] ? (matrix[18][colIdx] || "N/A") : "N/A";
+                            let disportEta = matrix[19] ? (matrix[19][colIdx] || "N/A") : "N/A";
+                            let remarks = matrix[27] ? (matrix[27][colIdx] || "No Alerts") : "No Alerts";
+                            let nextVoyage = matrix[33] ? (matrix[33][colIdx] || "TBD") : "TBD";
+                            
+                            let coord = estimateCoordinate(status.toString());
+
+                            parsedFleet.push({
+                                "vessel": vName, "status": status, "activity": activity,
+                                "loading_port": loadPort, "loading_eta": loadEta,
+                                "ms_cargo": isNaN(msVal) ? 0 : msVal, "hsd_cargo": isNaN(hsdVal) ? 0 : hsdVal,
+                                "disport": disport, "disport_eta": disportEta,
+                                "remarks": remarks, "next_voyage": nextVoyage,
+                                "lat": coord[0], "lon": coord[1]
+                            });
+                        }
+                    }
+                }
+
+                if(parsedFleet.length > 0) {
+                    currentFleetData = parsedFleet;
+                    applyFilters();
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        window.onload = function() {
+            initDashboardMap();
+            renderDashboardView(currentFleetData);
+        };
+    </script>
+</body>
+</html>
