@@ -111,7 +111,7 @@
             <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-slate-100 pb-3">
                 <div class="space-y-0.5">
                     <h2 class="text-sm font-bold text-slate-800">🗺️ Spatial Fleet Matrix Mapping (Hover for Telemetry Details)</h2>
-                    <p class="text-xs text-slate-500">Pulsing indicators show active live-state. Place cursor on labels or markers to reveal route ETAs.</p>
+                    <p class="text-xs text-slate-500">Pulsing indicators show active live-state. Place cursor on labels or markers to reveal route ETAs and localized cargo discharge windows.</p>
                 </div>
                 <!-- Legend Indicators -->
                 <div class="flex flex-wrap items-center gap-4 text-xs bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
@@ -189,7 +189,6 @@
         let map, markerLayerGroup;
 
         function initDashboardMap() {
-            // Using Positron light style tiles instead of dark mode
             map = L.map('map').setView([18.5, 79.5], 5);
             L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
                 attribution: '©OpenStreetMap ©CartoDB'
@@ -232,6 +231,37 @@
         function estimateCoordinate(statusString) {
             let cleaner = statusString.replace("To ", "").trim();
             return PORT_GEOLOCATIONS[cleaner] || [16.0, 78.0];
+        }
+
+        // Logic framework helper to split up complex cargo arrays found within comments/remarks
+        function evaluateExtendedCargoMetrics(vesselObj) {
+            const normAct = normalizeActivity(vesselObj.activity);
+            const totalCargo = (vesselObj.ms_cargo || 0) + (vesselObj.hsd_cargo || 0);
+            
+            let currentDischQty = totalCargo;
+            let nextDischQty = 0;
+            let multiDropDetected = false;
+
+            if (normAct === 'Discharging') {
+                const remarkStr = (vesselObj.remarks || "").toUpperCase();
+                // Match patterns like "BPCL (19.9) & HPCL (14.9)" or similar paren indicators
+                const matches = [...remarkStr.matchAll(/\(([\d\.]+)\)/g)];
+                if (matches.length >= 2) {
+                    multiDropDetected = true;
+                    currentDischQty = parseFloat(matches[0][1]);
+                    nextDischQty = parseFloat(matches[1][1]);
+                } else if (totalCargo > 0) {
+                    currentDischQty = totalCargo;
+                    nextDischQty = 0;
+                }
+            }
+
+            return {
+                totalCargo: totalCargo.toFixed(1),
+                currentDischQty: currentDischQty.toFixed(1),
+                nextDischQty: nextDischQty.toFixed(1),
+                hasSplitDrop: multiDropDetected
+            };
         }
 
         function processAndRenderData() {
@@ -287,13 +317,31 @@
                     iconAnchor: [7, 7]
                 });
 
+                // Generate telemetry parameters
+                const normAct = normalizeActivity(v.activity);
+                const cargoMetrics = evaluateExtendedCargoMetrics(v);
+                
+                let dynamicCargoHtml = '';
+                if (normAct === 'Loading' || normAct === 'Discharging') {
+                    dynamicCargoHtml += `<div class="text-[11px] text-purple-800 font-bold mt-1 bg-purple-50 p-1.5 rounded border border-purple-100">`;
+                    dynamicCargoHtml += `📦 Total Vol On-Board: ${cargoMetrics.totalCargo} TMT`;
+                    
+                    if (normAct === 'Discharging') {
+                        dynamicCargoHtml += `<br>📉 Disch Qty at ${v.status}: ${cargoMetrics.currentDischQty} TMT`;
+                        if (cargoMetrics.hasSplitDrop || v.next_voyage.includes("ETA")) {
+                            dynamicCargoHtml += `<br>⏭️ Next Call Planned Disch: ${cargoMetrics.nextDischQty !== "0.0" ? cargoMetrics.nextDischQty : "Balance"} TMT`;
+                        }
+                    }
+                    dynamicCargoHtml += `</div>`;
+                }
+
                 const infoPopupHtml = `
                     <div class="p-2 font-sans space-y-1 text-slate-800 leading-tight">
                         <div class="font-black text-sm border-b border-slate-200 pb-1 flex items-center gap-1.5 text-slate-900">🚢 ${v.vessel}</div>
-                        <div class="text-[11px] mt-1"><b>Status Node:</b> ${v.status} (${normalizeActivity(v.activity)})</div>
+                        <div class="text-[11px] mt-1"><b>Status Node:</b> ${v.status} (${normAct})</div>
                         <div class="text-[11px] text-emerald-700"><b>Load Port:</b> ${v.loading_port} (ETA: ${v.loading_eta})</div>
                         <div class="text-[11px] text-blue-700"><b>Disport:</b> ${v.disport} (ETA: ${v.disport_eta})</div>
-                        <div class="text-[11px] text-purple-700 font-semibold"><b>Cargo Load:</b> MS: ${v.ms_cargo} / HSD: ${v.hsd_cargo} TMT</div>
+                        ${dynamicCargoHtml}
                     </div>
                 `;
 
@@ -356,7 +404,31 @@
         function generateCardHtml(v) {
             const cssPulse = getPulseIndicatorClass(v.activity);
             const colorHex = normalizeActivity(v.activity) === 'Sailing' ? '#10b981' : (normalizeActivity(v.activity) === 'Discharging' ? '#3b82f6' : (normalizeActivity(v.activity) === 'Loading' ? '#f59e0b' : '#ef4444'));
-            
+            const normAct = normalizeActivity(v.activity);
+            const cargoMetrics = evaluateExtendedCargoMetrics(v);
+
+            let cargoContextSection = '';
+            if (normAct === 'Loading' || normAct === 'Discharging') {
+                cargoContextSection = `
+                    <div class="bg-purple-50/70 border border-purple-100 p-2.5 rounded-lg text-[11px] space-y-1">
+                        <div class="flex justify-between text-purple-900 font-bold">
+                            <span>📦 Total Cargo Volume:</span>
+                            <span>${cargoMetrics.totalCargo} TMT</span>
+                        </div>
+                        ${normAct === 'Discharging' ? `
+                            <div class="flex justify-between text-slate-600 text-[10px]">
+                                <span>📉 Local Disch (${v.status}):</span>
+                                <span class="font-semibold text-slate-900">${cargoMetrics.currentDischQty} TMT</span>
+                            </div>
+                            <div class="flex justify-between text-slate-600 text-[10px]">
+                                <span>⏭️ Next Disport Plan:</span>
+                                <span class="font-semibold text-slate-900">${cargoMetrics.nextDischQty !== "0.0" ? cargoMetrics.nextDischQty + " TMT" : "Balance"}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
             return `
                 <div class="vessel-card bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-4 shadow-xs">
                     <div class="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
@@ -368,7 +440,7 @@
                             </div>
                         </div>
                         <span class="px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider ${getActivityColorClass(v.activity)}">
-                            ${normalizeActivity(v.activity)}
+                            ${normAct}
                         </span>
                     </div>
                     
@@ -385,9 +457,11 @@
                         </div>
                     </div>
 
+                    ${cargoContextSection}
+
                     <div class="bg-slate-50/50 px-3 py-2 rounded-lg border border-slate-100 flex justify-between items-center text-[11px]">
                         <div>
-                            <span class="text-[9px] font-mono text-slate-400 block uppercase tracking-wider">Active Cargo Loads</span>
+                            <span class="text-[9px] font-mono text-slate-400 block uppercase tracking-wider">Product Allocation Breakdown</span>
                             <div class="flex items-center gap-3 mt-0.5 font-bold">
                                 <span class="text-blue-600">MS: ${v.ms_cargo} TMT</span>
                                 <span class="text-amber-600">HSD: ${v.hsd_cargo} TMT</span>
