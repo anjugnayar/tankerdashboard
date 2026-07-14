@@ -553,8 +553,64 @@
             return null;
         }
 
-        function lerp(a, b, t) {
-            return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        // A straight line between two ports on OPPOSITE coasts of the Indian peninsula
+        // (e.g. Haldia to Kochi) cuts directly across the landmass -- physically impossible
+        // for a ship. These waypoints trace the coastline from Gujarat down around the
+        // southern tip (Kanyakumari) and back up the east coast, so routes follow the sea.
+        const COASTAL_WAYPOINTS = [
+            [23.40, 68.95], [22.80, 69.20], [21.70, 69.60], [20.90, 70.60], [20.60, 71.80],
+            [20.90, 72.20], [19.90, 72.50], [18.95, 72.60], [17.80, 73.10], [16.50, 73.30],
+            [15.42, 73.65], [14.60, 74.10], [13.35, 74.55], [11.90, 75.40], [10.55, 75.85],
+            [9.95, 76.10], [8.90, 76.55], [8.08, 77.35], [8.55, 78.15], [9.85, 79.10],
+            [11.20, 79.85], [13.05, 80.45], [14.30, 80.35], [16.20, 81.90], [17.70, 83.45],
+            [19.30, 85.10], [20.30, 86.90], [21.50, 87.90], [21.60, 88.20]
+        ];
+
+        function nearestWaypointIndex(coord) {
+            let best = 0, bestD = Infinity;
+            COASTAL_WAYPOINTS.forEach((wp, i) => {
+                const d = (wp[0] - coord[0]) ** 2 + (wp[1] - coord[1]) ** 2;
+                if (d < bestD) { bestD = d; best = i; }
+            });
+            return best;
+        }
+
+        // Builds a multi-point sea route: real origin -> nearest coastal waypoints (in
+        // coastline order, whichever direction is between the two ports) -> real destination.
+        function buildSeaRoute(origin, dest) {
+            const oi = nearestWaypointIndex(origin);
+            const di = nearestWaypointIndex(dest);
+            const path = [origin];
+            if (oi <= di) {
+                for (let i = oi; i <= di; i++) path.push(COASTAL_WAYPOINTS[i]);
+            } else {
+                for (let i = oi; i >= di; i--) path.push(COASTAL_WAYPOINTS[i]);
+            }
+            path.push(dest);
+            return path;
+        }
+
+        function pathLength(path) {
+            let total = 0;
+            for (let i = 1; i < path.length; i++) total += Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
+            return total;
+        }
+
+        // Walks the multi-segment path and returns the point at the given fraction of its
+        // TOTAL length (not just picking a waypoint index), so progress reflects real distance.
+        function pointAlongPath(path, fraction) {
+            const total = pathLength(path);
+            if (total === 0) return path[0];
+            let target = total * fraction;
+            for (let i = 1; i < path.length; i++) {
+                const segLen = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
+                if (target <= segLen || i === path.length - 1) {
+                    const t = segLen === 0 ? 0 : target / segLen;
+                    return [path[i - 1][0] + (path[i][0] - path[i - 1][0]) * t, path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t];
+                }
+                target -= segLen;
+            }
+            return path[path.length - 1];
         }
 
         function estimateVesselPosition(v) {
@@ -591,9 +647,10 @@
             if (originCoord && etaDate && departDate && etaDate.getTime() > departDate.getTime()) {
                 let fraction = (Date.now() - departDate.getTime()) / (etaDate.getTime() - departDate.getTime());
                 fraction = Math.max(0.05, Math.min(0.95, fraction));
+                const seaPath = buildSeaRoute(originCoord, destCoord);
                 return {
-                    coord: lerp(originCoord, destCoord, fraction),
-                    route: { originCoord, destCoord, originName, destName, fraction, etaDate }
+                    coord: pointAlongPath(seaPath, fraction),
+                    route: { originCoord, destCoord, originName, destName, fraction, etaDate, seaPath }
                 };
             }
             // Not enough data to interpolate -- still avoid implying "arrived"; caller frames
@@ -697,7 +754,8 @@
             } else {
                 where = v.status || v.disport || act;
             }
-            return `${v.vessel} · ${where}`;
+            const cargo = `MS ${fmtNum(v.ms_cargo)} / HSD ${fmtNum(v.hsd_cargo)}`;
+            return `${v.vessel} · ${where} · ${cargo}`;
         }
 
         // Toggles every marker's info between hover-only (rich tooltip) and always-on
@@ -819,8 +877,8 @@
                 placed.forEach(({ vessel: v, est, coord }) => {
                     const act = normalizeActivity(v.activity);
 
-                    if (est.route && est.route.fraction !== null && est.route.originCoord) {
-                        L.polyline([est.route.originCoord, est.route.destCoord], {
+                    if (est.route && est.route.fraction !== null && est.route.seaPath) {
+                        L.polyline(est.route.seaPath, {
                             color: ACTIVITY_COLORS['Sailing'], weight: 2, opacity: 0.45, dashArray: '4,6'
                         }).addTo(markerLayerGroup);
                     }
