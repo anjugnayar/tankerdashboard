@@ -31,6 +31,12 @@
         .label-discharging { color: #2563eb; border-color: rgba(59, 130, 246, 0.5); }
         .label-loading { color: #d97706; border-color: rgba(245, 158, 11, 0.5); }
         .label-berthed { color: #dc2626; border-color: rgba(239, 68, 68, 0.5); }
+
+        .leaflet-tooltip.vessel-tooltip { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18); padding: 10px 12px; opacity: 1; }
+        .leaflet-tooltip.vessel-tooltip.leaflet-tooltip-top::before { border-top-color: #ffffff; }
+        .leaflet-tooltip.vessel-tooltip.leaflet-tooltip-bottom::before { border-bottom-color: #ffffff; }
+        .leaflet-tooltip.vessel-tooltip.leaflet-tooltip-left::before { border-left-color: #ffffff; }
+        .leaflet-tooltip.vessel-tooltip.leaflet-tooltip-right::before { border-right-color: #ffffff; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen selection:bg-blue-500 selection:text-white">
@@ -87,6 +93,16 @@
         </section>
 
         <section class="bg-white p-4 rounded-xl border border-slate-200 space-y-3 shadow-xs">
+            <div class="flex items-center justify-between">
+                <h3 class="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Fleet Position Map</h3>
+                <button id="labelsToggleBtn" type="button" onclick="toggleMapLabels()"
+                    class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg pl-2.5 pr-3 py-1.5 hover:bg-slate-100 transition-colors">
+                    <span id="labelsToggleTrack" class="relative inline-block w-8 h-4 rounded-full bg-slate-300 transition-colors">
+                        <span id="labelsToggleDot" class="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform"></span>
+                    </span>
+                    <span id="labelsToggleText">Show All Details</span>
+                </button>
+            </div>
             <div id="map" class="bg-slate-100 border border-slate-200"></div>
         </section>
 
@@ -124,6 +140,7 @@
         // GLOBAL STATE
         // =====================================================================
         let currentFleetData = [];
+        let permanentLabels = false;
         let map, markerLayerGroup;
 
         // Section+field label columns (A = section, B = field) before vessel data starts.
@@ -478,53 +495,230 @@
         }
 
         // =====================================================================
+        // SAILING POSITION ESTIMATION
+        // =====================================================================
+        // A "Sailing" vessel is, by definition, somewhere BETWEEN two ports -- placing its
+        // marker exactly on a port (as before) implies it has already arrived, which is
+        // wrong. This estimates an actual in-transit position from the schedule:
+        //   destination  <- Current Status ("To Kochi")
+        //   origin       <- the port it last departed (see below)
+        //   fraction     <- (today - departure) / (ETA - departure), clamped so it never
+        //                    visually lands exactly on either port while still "Sailing"
+        // Non-sailing vessels (Discharging/Loading/Berthed) are genuinely AT a port, so
+        // they keep the original direct placement.
+
+        // Handles every date format seen in this template: real Date cells, "DD-MM-YYYY",
+        // "DD-MM-YY/HH:MM", "DD-MM-YY/ AM"/"PM" (no exact hour), and free-text remark dates
+        // like "DD-MM-YYYY HH:MM" or "DD-MM-YY HH:MM" with no slash at all.
+        function parseFlexibleDate(input) {
+            if (!input) return null;
+            if (input instanceof Date) return isNaN(input.getTime()) ? null : input;
+            const str = String(input).trim();
+            const m = str.match(/(\d{1,2})-(\d{1,2})-(\d{2,4})(?:[\/\s]+(\d{1,2}):(\d{2})|[\/\s]+(AM|PM))?/i);
+            if (!m) return null;
+            let dd = parseInt(m[1], 10), mo = parseInt(m[2], 10), yyyy = parseInt(m[3], 10);
+            if (yyyy < 100) yyyy += 2000;
+            const hour = m[4] ? parseInt(m[4], 10) : (m[6] && m[6].toUpperCase() === 'PM' ? 12 : 0);
+            const minute = m[5] ? parseInt(m[5], 10) : 0;
+            const d = new Date(yyyy, mo - 1, dd, hour, minute);
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        // Ops remarks conventionally read "Vessel sailed from <port> [on] <date> [time]." --
+        // pull the port name and departure timestamp out of that free text when present.
+        function extractOriginFromRemarks(text) {
+            if (!text) return null;
+            const m = String(text).match(/sailed\s+from\s+([A-Za-z][A-Za-z\s]*?)(?=\s+on\b|\s+\d|[.,]|$)/i);
+            if (!m) return null;
+            const name = m[1].trim();
+            const coord = getCoords(name);
+            if (!coord) return null;
+            const afterIdx = m.index + m[0].length;
+            const date = parseFlexibleDate(String(text).slice(afterIdx, afterIdx + 30)) || parseFlexibleDate(text);
+            return { name, coord, date };
+        }
+
+        function coordsEqual(a, b) {
+            return !!a && !!b && Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+        }
+
+        // Finds which leg (if any) of a loading/disport breakdown corresponds to a given
+        // coordinate, matched by geocoding each leg's port rather than string equality --
+        // robust to spelling variants ("Paradeep" vs "Pardeep") that share a coordinate.
+        function findMatchingLeg(legs, destCoord) {
+            if (!legs || !destCoord) return null;
+            for (const leg of legs) {
+                if (coordsEqual(getCoords(leg.port), destCoord)) return leg;
+            }
+            return null;
+        }
+
+        function lerp(a, b, t) {
+            return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        }
+
+        function estimateVesselPosition(v) {
+            const act = normalizeActivity(v.activity);
+            const destCoord = getCoords(v.status) || getCoords(v.disport) || getCoords(v.loading_port);
+            if (act !== 'Sailing' || !destCoord) {
+                return destCoord ? { coord: destCoord, route: null } : null;
+            }
+
+            const disportLeg = findMatchingLeg(v.disport_legs, destCoord);
+            const loadingLeg = !disportLeg ? findMatchingLeg(v.loading_legs, destCoord) : null;
+
+            let originCoord = null, originName = null, departDate = null, etaDate = null, destName = null;
+
+            if (disportLeg) {
+                // Heading to discharge: came from its loading port.
+                originCoord = getCoords(v.loading_port);
+                originName = v.loading_port;
+                departDate = parseFlexibleDate(v.loading_sailed);
+                etaDate = parseFlexibleDate(disportLeg.eta);
+                destName = disportLeg.port;
+            } else if (loadingLeg) {
+                // Ballast leg heading to load: came from wherever the remarks say it sailed from.
+                const originInfo = extractOriginFromRemarks(v.remarks);
+                if (originInfo) {
+                    originCoord = originInfo.coord;
+                    originName = originInfo.name;
+                    departDate = originInfo.date;
+                }
+                etaDate = parseFlexibleDate(loadingLeg.eta);
+                destName = loadingLeg.port;
+            }
+
+            if (originCoord && etaDate && departDate && etaDate.getTime() > departDate.getTime()) {
+                let fraction = (Date.now() - departDate.getTime()) / (etaDate.getTime() - departDate.getTime());
+                fraction = Math.max(0.05, Math.min(0.95, fraction));
+                return {
+                    coord: lerp(originCoord, destCoord, fraction),
+                    route: { originCoord, destCoord, originName, destName, fraction, etaDate }
+                };
+            }
+            // Not enough data to interpolate -- still avoid implying "arrived"; caller frames
+            // this as "heading to" rather than "at", and no route line is drawn.
+            return { coord: destCoord, route: { originCoord: null, destCoord, originName: null, destName: destName || v.status, fraction: null, etaDate } };
+        }
+
+        // =====================================================================
         // MAP ICON + TOOLTIP CONTENT
         // =====================================================================
-        // Simple top-down tanker silhouette (pointed bow, boxy hull, aft superstructure
-        // block, deck/manifold lines) coloured by current activity so the map carries the
-        // same status meaning as the card badges.
+        // Clean circular badge (solid activity color, white ring + soft shadow) with a
+        // simple white hull glyph -- reads clearly at small map-marker size without the
+        // visual clutter of a fully-detailed ship silhouette.
         function buildTankerIconSvg(activity) {
             const color = ACTIVITY_COLORS[activity] || '#64748b';
-            return `<svg width="24" height="30" viewBox="0 0 24 30" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));">
-                <path d="M12 0 L20 9 L20 27 L4 27 L4 9 Z" fill="${color}" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
-                <line x1="12" y1="9" x2="12" y2="23" stroke="#ffffff" stroke-width="0.8" opacity="0.55"/>
-                <rect x="8" y="19" width="8" height="6" rx="1" fill="#ffffff" opacity="0.92"/>
-                <line x1="7" y1="12" x2="17" y2="12" stroke="#ffffff" stroke-width="0.7" opacity="0.5"/>
-                <line x1="7" y1="15" x2="17" y2="15" stroke="#ffffff" stroke-width="0.7" opacity="0.5"/>
+            return `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="14" cy="14" r="11" fill="${color}" stroke="#ffffff" stroke-width="2.2" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4));"/>
+                <path d="M14 6.5C16.5 9 17 12 17 14.5L17 20C17 21.3 15.9 22.4 14.6 22.4L13.4 22.4C12.1 22.4 11 21.3 11 20L11 14.5C11 12 11.5 9 14 6.5Z" fill="#ffffff"/>
             </svg>`;
         }
 
         function buildTankerIcon(activity) {
-            return L.divIcon({ html: buildTankerIconSvg(activity), className: '', iconSize: [24, 30], iconAnchor: [12, 15] });
+            return L.divIcon({ html: buildTankerIconSvg(activity), className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
         }
 
-        // Hover tooltip: current activity, full loading plan (each loading port with its
-        // own MS/HSD + ETA), and each disport with ITS OWN MS/HSD (not just a combined total).
-        function buildTooltipHtml(v) {
-            const act = normalizeActivity(v.activity);
-            let html = '<div style="font-size:11px;line-height:1.55;min-width:195px;">';
-            html += `<div style="font-weight:700;font-size:12.5px;margin-bottom:2px;">${escapeHtml(v.vessel)}</div>`;
-            html += `<div style="margin-bottom:4px;">Activity: <b>${escapeHtml(act)}</b></div>`;
+        // When two or more vessels resolve to the exact same coordinate (e.g. both currently
+        // "To Kochi"), their markers would sit exactly on top of one another and one would
+        // completely hide the other. Spread coincident points into a small ring around the
+        // shared location so every vessel gets its own visible, hoverable marker.
+        function spreadCoincidentCoords(entries) {
+            const groups = {};
+            entries.forEach(e => {
+                const key = e.coord[0].toFixed(3) + ',' + e.coord[1].toFixed(3);
+                (groups[key] = groups[key] || []).push(e);
+            });
+            const JITTER_DEG = 0.35;
+            Object.values(groups).forEach(group => {
+                if (group.length < 2) return;
+                group.sort((a, b) => String(a.vessel.vessel).localeCompare(String(b.vessel.vessel)));
+                group.forEach((e, idx) => {
+                    const angle = (2 * Math.PI * idx) / group.length - Math.PI / 2;
+                    e.coord = [e.coord[0] + JITTER_DEG * Math.sin(angle), e.coord[1] + JITTER_DEG * Math.cos(angle)];
+                });
+            });
+        }
 
-            html += `<div>Loading Plan:</div>`;
+        // Rich hover tooltip: current activity, route (if sailing), full loading plan (each
+        // loading port with its own MS/HSD + ETA), and each disport with ITS OWN MS/HSD.
+        // Uses the same Tailwind utility classes as the vessel cards for visual consistency;
+        // the enclosing box itself is styled via the .vessel-tooltip CSS rule.
+        function buildTooltipHtml(v, est) {
+            const act = normalizeActivity(v.activity);
+            const route = est && est.route;
+            let html = '<div class="min-w-[210px] max-w-[260px]">';
+            html += `<div class="flex items-center justify-between gap-3 pb-1.5 mb-1.5 border-b border-slate-100">`;
+            html += `<span class="font-bold text-slate-900 text-[13px]">${escapeHtml(v.vessel)}</span>`;
+            html += `<span class="text-[9px] px-2 py-0.5 rounded font-bold uppercase bg-slate-100 indicator-${act.toLowerCase()}">${escapeHtml(act)}</span>`;
+            html += `</div>`;
+            html += `<div class="text-[11px] text-slate-600 space-y-1">`;
+
+            if (route && route.destName) {
+                if (route.fraction !== null) {
+                    const pct = Math.round(route.fraction * 100);
+                    html += `<div class="text-emerald-700 font-semibold">En route: ${escapeHtml(route.originName)} → ${escapeHtml(route.destName)}</div>`;
+                    html += `<div class="text-slate-400">~${pct}% of the way · ETA ${escapeHtml(formatCellValue(route.etaDate))}</div>`;
+                } else {
+                    html += `<div class="text-emerald-700 font-semibold">Heading to: ${escapeHtml(route.destName)}</div>`;
+                    if (route.etaDate) html += `<div class="text-slate-400">ETA ${escapeHtml(formatCellValue(route.etaDate))}</div>`;
+                }
+            }
+
+            html += `<div class="font-semibold text-slate-400 text-[9px] uppercase tracking-wide pt-1">Loading Plan</div>`;
             const loadingLegs = (v.loading_legs && v.loading_legs.length) ? v.loading_legs
                 : [{ port: v.loading_port || 'N/A', ms: null, hsd: null, eta: '' }];
             loadingLegs.forEach(leg => {
                 const qty = (leg.ms === null) ? '' : ` — MS ${fmtNum(leg.ms)} / HSD ${fmtNum(leg.hsd)} TMT`;
                 const etaText = leg.eta ? ` · ETA ${escapeHtml(leg.eta)}` : '';
-                html += `<div style="padding-left:6px;">• <b>${escapeHtml(leg.port || 'N/A')}</b>${qty}${etaText}</div>`;
+                html += `<div class="pl-1">• <b class="text-slate-800">${escapeHtml(leg.port || 'N/A')}</b>${qty}${etaText}</div>`;
             });
 
             const disportLegs = (v.disport_legs && v.disport_legs.length) ? v.disport_legs
                 : [{ port: v.disport || 'N/A', ms: null, hsd: null }];
-            html += `<div style="margin-top:3px;">${disportLegs.length > 1 ? 'Disports:' : 'Disport:'}</div>`;
+            html += `<div class="font-semibold text-slate-400 text-[9px] uppercase tracking-wide pt-1">${disportLegs.length > 1 ? 'Disports' : 'Disport'}</div>`;
             disportLegs.forEach(leg => {
                 const qty = (leg.ms === null) ? '' : ` — MS ${fmtNum(leg.ms)} / HSD ${fmtNum(leg.hsd)} TMT`;
-                html += `<div style="padding-left:6px;">• <b>${escapeHtml(leg.port || 'N/A')}</b>${qty}</div>`;
+                html += `<div class="pl-1">• <b class="text-slate-800">${escapeHtml(leg.port || 'N/A')}</b>${qty}</div>`;
             });
 
-            html += '</div>';
+            html += `</div></div>`;
             return html;
+        }
+
+        // Compact single-line label for the "always visible" snapshot mode -- uses the
+        // page's existing .vessel-map-label / .label-<activity> styling.
+        function buildCompactLabelText(v, est) {
+            const act = normalizeActivity(v.activity);
+            const route = est && est.route;
+            let where;
+            if (act === 'Sailing' && route && route.destName) {
+                where = (route.fraction !== null ? 'En route to ' : 'Heading to ') + route.destName;
+            } else {
+                where = v.status || v.disport || act;
+            }
+            return `${v.vessel} · ${where}`;
+        }
+
+        // Toggles every marker's info between hover-only (rich tooltip) and always-on
+        // (compact label), so the whole fleet's status can be screenshotted at once.
+        function toggleMapLabels() {
+            permanentLabels = !permanentLabels;
+            const track = document.getElementById('labelsToggleTrack');
+            const dot = document.getElementById('labelsToggleDot');
+            const text = document.getElementById('labelsToggleText');
+            if (permanentLabels) {
+                track.classList.remove('bg-slate-300');
+                track.classList.add('bg-emerald-500');
+                dot.style.transform = 'translateX(16px)';
+                text.textContent = 'Hide All Details';
+            } else {
+                track.classList.remove('bg-emerald-500');
+                track.classList.add('bg-slate-300');
+                dot.style.transform = 'translateX(0)';
+                text.textContent = 'Show All Details';
+            }
+            processAndRenderData();
         }
 
         // =====================================================================
@@ -616,13 +810,32 @@
             document.getElementById('loadCountBadge').innerText = filtered.filter(v => normalizeActivity(v.activity) === 'Loading').length;
 
             if (markerLayerGroup) {
+                const placed = [];
                 filtered.forEach(v => {
-                    const coord = getCoords(v.status) || getCoords(v.disport);
-                    if (coord) {
-                        const act = normalizeActivity(v.activity);
-                        L.marker(coord, { icon: buildTankerIcon(act) })
-                            .addTo(markerLayerGroup)
-                            .bindTooltip(buildTooltipHtml(v), { sticky: true, direction: 'top', offset: [0, -16], opacity: 0.97 });
+                    const est = estimateVesselPosition(v);
+                    if (est && est.coord) placed.push({ vessel: v, est, coord: est.coord.slice() });
+                });
+                spreadCoincidentCoords(placed);
+                placed.forEach(({ vessel: v, est, coord }) => {
+                    const act = normalizeActivity(v.activity);
+
+                    if (est.route && est.route.fraction !== null && est.route.originCoord) {
+                        L.polyline([est.route.originCoord, est.route.destCoord], {
+                            color: ACTIVITY_COLORS['Sailing'], weight: 2, opacity: 0.45, dashArray: '4,6'
+                        }).addTo(markerLayerGroup);
+                    }
+
+                    const marker = L.marker(coord, { icon: buildTankerIcon(act) }).addTo(markerLayerGroup);
+                    if (permanentLabels) {
+                        marker.bindTooltip(buildCompactLabelText(v, est), {
+                            permanent: true, direction: 'top', offset: [0, -16], opacity: 1,
+                            className: `vessel-map-label label-${act.toLowerCase()}`
+                        });
+                    } else {
+                        marker.bindTooltip(buildTooltipHtml(v, est), {
+                            sticky: true, direction: 'top', offset: [0, -16], opacity: 1,
+                            className: 'vessel-tooltip'
+                        });
                     }
                 });
             }
