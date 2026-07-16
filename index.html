@@ -284,6 +284,7 @@
         // so a vessel spanning 2 merged columns -- or split into 2 differing sub-columns
         // for two parcels -- is treated as ONE vessel with multiple source columns.
         function buildVesselGroups(nameRow, startCol) {
+            if (!nameRow) return [];
             const groups = [];
             let i = startCol;
             while (i < nameRow.length) {
@@ -342,20 +343,23 @@
         // anywhere between (rows can be inserted/removed like any other row heading).
         // The actual MS/HSD figures can land in any column of that row, or spill onto
         // the row right after it, so once a label row is found, read full-row text there
-        // and one row below it.
+        // and one row below it. This cell can also be a FORMULA rather than a typed
+        // value -- Excel always saves a formula's last-calculated result alongside it
+        // (SheetJS exposes that cached result as the cell's normal value), so this
+        // already works for formulas in the common case with no special handling needed.
         function extractInTransitTotals(nativeMatrix, filledMatrix) {
-            let ms = 0, hsd = 0;
+            let ms = 0, hsd = 0, msFound = false, hsdFound = false;
             for (let r = 0; r < filledMatrix.length; r++) {
                 if (!isInTransitLabelRow(filledMatrix[r])) continue;
                 for (let look = r; look <= r + 1 && look < nativeMatrix.length; look++) {
                     const rowText = rowToText(nativeMatrix[look]);
                     const msMatch = rowText.match(/([\d]+(?:\.\d+)?)\s*MS\b/i);
                     const hsdMatch = rowText.match(/([\d]+(?:\.\d+)?)\s*HSD\b/i);
-                    if (msMatch) ms = parseFloat(msMatch[1]);
-                    if (hsdMatch) hsd = parseFloat(hsdMatch[1]);
+                    if (msMatch) { ms = parseFloat(msMatch[1]); msFound = true; }
+                    if (hsdMatch) { hsd = parseFloat(hsdMatch[1]); hsdFound = true; }
                 }
             }
-            return { ms, hsd };
+            return { ms, hsd, msFound, hsdFound };
         }
 
         // Rows identified as the In-Transit summary are excluded from the main per-vessel
@@ -395,7 +399,7 @@
             const headerEndRow = getHeaderBlockEndRow(sheet, headerRowIdx, LABEL_COLS);
 
             // 4) Fleet-wide "In Transit" summary -- scanned across the whole sheet.
-            const totals = extractInTransitTotals(nativeMatrix, filledMatrix);
+            const rawTotals = extractInTransitTotals(nativeMatrix, filledMatrix);
             const inTransitRows = buildInTransitRowSkipSet(filledMatrix);
 
             // 5) Vessel column groups from the (merge-filled) header row.
@@ -491,7 +495,27 @@
                 fleetData[name].loading_legs = loadingLegsByVessel[name] || [];
             });
 
-            return { vessels: Object.values(fleetData), totals };
+            const vessels = Object.values(fleetData);
+
+            // If the sheet's own In-Transit MS/HSD couldn't be read (most commonly: a
+            // formula whose result was never calculated/cached before the file was saved,
+            // so there is no value to read at all -- not something a spreadsheet reader can
+            // fix without re-running the formula), fall back to summing Cargo On Board across
+            // currently-Sailing vessels, and say plainly that it's an estimate rather than
+            // silently showing 0 or passing off a derived number as the sheet's own figure.
+            let totals = { ms: rawTotals.ms, hsd: rawTotals.hsd, estimated: false };
+            if (!rawTotals.msFound || !rawTotals.hsdFound) {
+                const sailing = vessels.filter(v => normalizeActivity(v.activity) === 'Sailing');
+                const estMs = sailing.reduce((sum, v) => sum + (parseFloat(v.ms_cargo) || 0), 0);
+                const estHsd = sailing.reduce((sum, v) => sum + (parseFloat(v.hsd_cargo) || 0), 0);
+                totals = {
+                    ms: rawTotals.msFound ? rawTotals.ms : estMs,
+                    hsd: rawTotals.hsdFound ? rawTotals.hsd : estHsd,
+                    estimated: !rawTotals.msFound || !rawTotals.hsdFound
+                };
+            }
+
+            return { vessels, totals };
         }
 
         // =====================================================================
@@ -600,17 +624,23 @@
         // TOTAL length (not just picking a waypoint index), so progress reflects real distance.
         function pointAlongPath(path, fraction) {
             const total = pathLength(path);
-            if (total === 0) return path[0];
+            if (total === 0) return { point: path[0], bearing: 0 };
             let target = total * fraction;
             for (let i = 1; i < path.length; i++) {
-                const segLen = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
+                const dLat = path[i][0] - path[i - 1][0], dLng = path[i][1] - path[i - 1][1];
+                const segLen = Math.hypot(dLat, dLng);
                 if (target <= segLen || i === path.length - 1) {
                     const t = segLen === 0 ? 0 : target / segLen;
-                    return [path[i - 1][0] + (path[i][0] - path[i - 1][0]) * t, path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t];
+                    const point = [path[i - 1][0] + dLat * t, path[i - 1][1] + dLng * t];
+                    // Compass bearing of this segment: 0=N, 90=E, clockwise (matches SVG rotate()).
+                    let bearing = Math.atan2(dLng, dLat) * 180 / Math.PI;
+                    if (bearing < 0) bearing += 360;
+                    return { point, bearing };
                 }
                 target -= segLen;
             }
-            return path[path.length - 1];
+            const last = path[path.length - 1];
+            return { point: last, bearing: 0 };
         }
 
         function estimateVesselPosition(v) {
@@ -648,13 +678,14 @@
                 let fraction = (Date.now() - departDate.getTime()) / (etaDate.getTime() - departDate.getTime());
                 fraction = Math.max(0.05, Math.min(0.95, fraction));
                 const seaPath = buildSeaRoute(originCoord, destCoord);
+                const { point, bearing } = pointAlongPath(seaPath, fraction);
                 return {
-                    coord: pointAlongPath(seaPath, fraction),
-                    route: { originCoord, destCoord, originName, destName, fraction, etaDate, seaPath }
+                    coord: point,
+                    route: { originCoord, destCoord, originName, destName, fraction, etaDate, bearing }
                 };
             }
             // Not enough data to interpolate -- still avoid implying "arrived"; caller frames
-            // this as "heading to" rather than "at", and no route line is drawn.
+            // this as "heading to" rather than "at", and no direction arrow is drawn.
             return { coord: destCoord, route: { originCoord: null, destCoord, originName: null, destName: destName || v.status, fraction: null, etaDate } };
         }
 
@@ -663,17 +694,26 @@
         // =====================================================================
         // Clean circular badge (solid activity color, white ring + soft shadow) with a
         // simple white hull glyph -- reads clearly at small map-marker size without the
-        // visual clutter of a fully-detailed ship silhouette.
-        function buildTankerIconSvg(activity) {
+        // visual clutter of a fully-detailed ship silhouette. For vessels whose position
+        // was interpolated along the coast, a small flag/arrow is attached to the badge
+        // pointing toward the destination -- a lighter-weight alternative to drawing a
+        // full route line on the map.
+        function buildTankerIconSvg(activity, bearing) {
             const color = ACTIVITY_COLORS[activity] || '#64748b';
-            return `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="14" cy="14" r="11" fill="${color}" stroke="#ffffff" stroke-width="2.2" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4));"/>
-                <path d="M14 6.5C16.5 9 17 12 17 14.5L17 20C17 21.3 15.9 22.4 14.6 22.4L13.4 22.4C12.1 22.4 11 21.3 11 20L11 14.5C11 12 11.5 9 14 6.5Z" fill="#ffffff"/>
+            const arrow = (typeof bearing === 'number')
+                ? `<g transform="rotate(${bearing.toFixed(1)} 18 18)">
+                       <path d="M18 1 L22 9.5 L18 7.5 L14 9.5 Z" fill="${color}" stroke="#ffffff" stroke-width="1" stroke-linejoin="round"/>
+                   </g>`
+                : '';
+            return `<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+                ${arrow}
+                <circle cx="18" cy="18" r="11" fill="${color}" stroke="#ffffff" stroke-width="2.2" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4));"/>
+                <path d="M18 10.5C20.5 13 21 16 21 18.5L21 24C21 25.3 19.9 26.4 18.6 26.4L17.4 26.4C16.1 26.4 15 25.3 15 24L15 18.5C15 16 15.5 13 18 10.5Z" fill="#ffffff"/>
             </svg>`;
         }
 
-        function buildTankerIcon(activity) {
-            return L.divIcon({ html: buildTankerIconSvg(activity), className: '', iconSize: [28, 28], iconAnchor: [14, 14] });
+        function buildTankerIcon(activity, bearing) {
+            return L.divIcon({ html: buildTankerIconSvg(activity, bearing), className: '', iconSize: [36, 36], iconAnchor: [18, 18] });
         }
 
         // When two or more vessels resolve to the exact same coordinate (e.g. both currently
@@ -696,6 +736,25 @@
                 });
             });
         }
+
+        // Marker jitter above only separates EXACT coincidences. Vessels that are merely
+        // close together (not identical) can still have their LABELS overlap on screen even
+        // though the markers themselves are fine. This assigns each vessel in a nearby cluster
+        // an index used to stagger label height, without moving the underlying marker position.
+        function assignLabelStagger(entries) {
+            const PROXIMITY_DEG = 0.9; // roughly the screen distance at which labels start to overlap at the default zoom
+            const clusters = [];
+            entries.forEach(e => {
+                let target = clusters.find(c => c.some(m => Math.hypot(m.coord[0] - e.coord[0], m.coord[1] - e.coord[1]) < PROXIMITY_DEG));
+                if (!target) { target = []; clusters.push(target); }
+                target.push(e);
+            });
+            clusters.forEach(cluster => {
+                cluster.sort((a, b) => String(a.vessel.vessel).localeCompare(String(b.vessel.vessel)));
+                cluster.forEach((e, idx) => { e.labelIndex = idx; });
+            });
+        }
+
 
         // Rich hover tooltip: current activity, route (if sailing), full loading plan (each
         // loading port with its own MS/HSD + ETA), and each disport with ITS OWN MS/HSD.
@@ -800,8 +859,16 @@
 
                     currentFleetData = vessels;
 
-                    document.getElementById('msTotal').innerText = `${totals.ms.toFixed(1)} TMT`;
-                    document.getElementById('hsdTotal').innerText = `${totals.hsd.toFixed(1)} TMT`;
+                    const estSuffix = totals.estimated ? ' (est.)' : '';
+                    const estTitle = totals.estimated
+                        ? 'The sheet\u2019s own In Transit figure could not be read (e.g. a formula with no calculated value saved). Estimated instead from Cargo On Board across currently-Sailing vessels.'
+                        : '';
+                    const msEl = document.getElementById('msTotal');
+                    const hsdEl = document.getElementById('hsdTotal');
+                    msEl.innerText = `${totals.ms.toFixed(1)} TMT${estSuffix}`;
+                    hsdEl.innerText = `${totals.hsd.toFixed(1)} TMT${estSuffix}`;
+                    msEl.title = estTitle;
+                    hsdEl.title = estTitle;
 
                     const now = new Date();
                     document.getElementById('liveTimestampBadge').innerText = `Last Updated: ${now.toLocaleTimeString()}`;
@@ -874,24 +941,21 @@
                     if (est && est.coord) placed.push({ vessel: v, est, coord: est.coord.slice() });
                 });
                 spreadCoincidentCoords(placed);
-                placed.forEach(({ vessel: v, est, coord }) => {
+                assignLabelStagger(placed);
+                placed.forEach(({ vessel: v, est, coord, labelIndex }) => {
                     const act = normalizeActivity(v.activity);
+                    const bearing = (est.route && est.route.fraction !== null) ? est.route.bearing : undefined;
+                    const baseOffset = -22 - (labelIndex || 0) * 24; // stagger labels of nearby vessels so they don't overlap
 
-                    if (est.route && est.route.fraction !== null && est.route.seaPath) {
-                        L.polyline(est.route.seaPath, {
-                            color: ACTIVITY_COLORS['Sailing'], weight: 2, opacity: 0.45, dashArray: '4,6'
-                        }).addTo(markerLayerGroup);
-                    }
-
-                    const marker = L.marker(coord, { icon: buildTankerIcon(act) }).addTo(markerLayerGroup);
+                    const marker = L.marker(coord, { icon: buildTankerIcon(act, bearing) }).addTo(markerLayerGroup);
                     if (permanentLabels) {
                         marker.bindTooltip(buildCompactLabelText(v, est), {
-                            permanent: true, direction: 'top', offset: [0, -16], opacity: 1,
+                            permanent: true, direction: 'top', offset: [0, baseOffset], opacity: 1,
                             className: `vessel-map-label label-${act.toLowerCase()}`
                         });
                     } else {
                         marker.bindTooltip(buildTooltipHtml(v, est), {
-                            sticky: true, direction: 'top', offset: [0, -16], opacity: 1,
+                            sticky: true, direction: 'top', offset: [0, -22], opacity: 1,
                             className: 'vessel-tooltip'
                         });
                     }
