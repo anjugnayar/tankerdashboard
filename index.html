@@ -458,11 +458,15 @@
 
             // 6) Per-column ("per-leg") breakdowns for Loading & Disport: pairs each port
             //    with ITS OWN ms/hsd instead of only the combined/summed scalars above.
-            function buildLegs(portKey, etaKey, msKey, hsdKey) {
+            function buildLegs(portKey, etaKey, msKey, hsdKey, norKey, allFastKey, etcKey, sailedKey) {
                 const portRow = rowIndexByAttrKey[portKey];
                 const etaRow = rowIndexByAttrKey[etaKey];
                 const msRow = rowIndexByAttrKey[msKey];
                 const hsdRow = rowIndexByAttrKey[hsdKey];
+                const norRow = rowIndexByAttrKey[norKey];
+                const allFastRow = rowIndexByAttrKey[allFastKey];
+                const etcRow = rowIndexByAttrKey[etcKey];
+                const sailedRow = rowIndexByAttrKey[sailedKey];
                 const legsByVessel = {};
                 if (portRow === undefined && msRow === undefined && hsdRow === undefined) {
                     vesselGroups.forEach(({ name }) => { legsByVessel[name] = []; });
@@ -475,21 +479,25 @@
                 };
                 vesselGroups.forEach(({ name, cols }) => {
                     const legs = cols.map(c => {
+                        const get = (row) => (row !== undefined) ? cleanText(nativeMatrix[row][c]) : '';
                         const portV = (portRow !== undefined) ? nativeMatrix[portRow][c] : '';
                         const etaV = (etaRow !== undefined) ? nativeMatrix[etaRow][c] : '';
                         const msV = (msRow !== undefined) ? nativeMatrix[msRow][c] : '';
                         const hsdV = (hsdRow !== undefined) ? nativeMatrix[hsdRow][c] : '';
                         const ms = (typeof msV === 'number') ? msV : (parseFloat(msV) || 0);
                         const hsd = (typeof hsdV === 'number') ? hsdV : (parseFloat(hsdV) || 0);
-                        return { port: cleanText(portV), eta: cleanText(etaV), ms, hsd };
+                        return {
+                            port: cleanText(portV), eta: cleanText(etaV), ms, hsd,
+                            nor: get(norRow), allFast: get(allFastRow), etc: get(etcRow), sailed: get(sailedRow)
+                        };
                     }).filter(leg => leg.port !== '' || leg.ms > 0 || leg.hsd > 0);
                     legsByVessel[name] = legs;
                 });
                 return legsByVessel;
             }
 
-            const disportLegsByVessel = buildLegs('disport', 'disport_eta', 'disport_ms', 'disport_hsd');
-            const loadingLegsByVessel = buildLegs('loading_port', 'loading_eta', 'loading_ms', 'loading_hsd');
+            const disportLegsByVessel = buildLegs('disport', 'disport_eta', 'disport_ms', 'disport_hsd', 'disport_nor', 'disport_all_fast', 'disport_etc', 'disport_sailed');
+            const loadingLegsByVessel = buildLegs('loading_port', 'loading_eta', 'loading_ms', 'loading_hsd', 'loading_nor', 'loading_all_fast', 'loading_etc', 'loading_sailed');
             vesselGroups.forEach(({ name }) => {
                 fleetData[name].disport_legs = disportLegsByVessel[name] || [];
                 fleetData[name].loading_legs = loadingLegsByVessel[name] || [];
@@ -577,6 +585,14 @@
             return null;
         }
 
+        // Current Status text can lag behind reality (nobody updated it yet). If NOR, All
+        // Fast, ETC, or Sailed is filled in for a leg, the vessel has already reached that
+        // port regardless of what Current Status still says -- an ETC in particular can only
+        // exist once loading is actually underway, which requires having already arrived.
+        function legReached(leg) {
+            return !!(leg && (leg.nor || leg.allFast || leg.etc || leg.sailed));
+        }
+
         // A straight line between two ports on OPPOSITE coasts of the Indian peninsula
         // (e.g. Haldia to Kochi) cuts directly across the landmass -- physically impossible
         // for a ship. These waypoints trace the coastline from Gujarat down around the
@@ -645,13 +661,35 @@
 
         function estimateVesselPosition(v) {
             const act = normalizeActivity(v.activity);
-            const destCoord = getCoords(v.status) || getCoords(v.disport) || getCoords(v.loading_port);
+            let destCoord = getCoords(v.status) || getCoords(v.disport) || getCoords(v.loading_port);
             if (act !== 'Sailing' || !destCoord) {
                 return destCoord ? { coord: destCoord, route: null } : null;
             }
 
-            const disportLeg = findMatchingLeg(v.disport_legs, destCoord);
-            const loadingLeg = !disportLeg ? findMatchingLeg(v.loading_legs, destCoord) : null;
+            let disportLeg = findMatchingLeg(v.disport_legs, destCoord);
+            let loadingLeg = !disportLeg ? findMatchingLeg(v.loading_legs, destCoord) : null;
+
+            if (disportLeg && legReached(disportLeg)) {
+                // Arrived at (or already left) this disport. There's no "next voyage" loading
+                // leg in this data to redirect to, so show it at its last confirmed position
+                // rather than mis-framing it as still approaching.
+                return { coord: destCoord, route: null };
+            }
+
+            if (loadingLeg && legReached(loadingLeg)) {
+                if (loadingLeg.sailed && v.disport_legs && v.disport_legs.length) {
+                    // Already departed this loading port: it's heading toward its disport now,
+                    // whatever Current Status still says.
+                    disportLeg = v.disport_legs[0];
+                    destCoord = getCoords(disportLeg.port) || destCoord;
+                    loadingLeg = null;
+                } else {
+                    // Arrived and loading (NOR/All Fast/ETC present) but not yet sailed, or
+                    // sailed with no disport data to route to: it's genuinely AT this port right
+                    // now -- show it plainly there, same as any other at-port vessel.
+                    return { coord: destCoord, route: null };
+                }
+            }
 
             let originCoord = null, originName = null, departDate = null, etaDate = null, destName = null;
 
