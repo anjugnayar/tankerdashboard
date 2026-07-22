@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Advanced Fleet Tanker Command Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
     <!-- Tailwind CSS -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <!-- Leaflet Engine -->
@@ -12,105 +14,128 @@
     <!-- SheetJS -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
-        #map { height: 520px; border-radius: 12px; z-index: 1; }
+        :root{
+            --navy:#0B2340; --navy-2:#12315A; --steel:#1D4E89; --teal:#0F6E66;
+            --bronze:#A97142; --graphite:#52606D; --paper:#F6F7F9; --hairline:#E4E8EE;
+            --burgundy:#8C3A3A;
+        }
+        html, body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; background:var(--paper); }
+        .font-mono{ font-family:'IBM Plex Mono', ui-monospace, monospace !important; }
+        #map { height: 520px; border-radius: 10px; z-index: 1; }
         .vessel-card { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-        .vessel-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1); }
-        
-        @keyframes radar-pulse-green { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
-        @keyframes radar-pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); } 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); } }
-        @keyframes radar-pulse-amber { 0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); } 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } }
-        @keyframes radar-pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
-        
-        .indicator-sailing { animation: radar-pulse-green 2s infinite; }
-        .indicator-discharging { animation: radar-pulse-blue 2s infinite; }
-        .indicator-loading { animation: radar-pulse-amber 2s infinite; }
-        .indicator-berthed { animation: radar-pulse-red 2s infinite; }
+        .vessel-card:hover { transform: translateY(-2px); box-shadow: 0 12px 20px -6px rgba(11,35,64,0.12), 0 4px 8px -4px rgba(11,35,64,0.08); }
 
-        .vessel-map-label { background: rgba(255, 255, 255, 0.95); border: 1px solid rgba(203, 213, 225, 1); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 700; white-space: nowrap; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1); transition: all 0.15s ease; }
-        .label-sailing { color: #059669; border-color: rgba(16, 185, 129, 0.5); }
-        .label-discharging { color: #2563eb; border-color: rgba(59, 130, 246, 0.5); }
-        .label-loading { color: #d97706; border-color: rgba(245, 158, 11, 0.5); }
-        .label-berthed { color: #dc2626; border-color: rgba(239, 68, 68, 0.5); }
+        @keyframes radar-pulse-green { 0% { box-shadow: 0 0 0 0 rgba(15,110,102,0.55); } 70% { box-shadow: 0 0 0 10px rgba(15,110,102,0); } 100% { box-shadow: 0 0 0 0 rgba(15,110,102,0); } }
+        @keyframes radar-pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(29,78,137,0.55); } 70% { box-shadow: 0 0 0 10px rgba(29,78,137,0); } 100% { box-shadow: 0 0 0 0 rgba(29,78,137,0); } }
+        @keyframes radar-pulse-amber { 0% { box-shadow: 0 0 0 0 rgba(169,113,66,0.55); } 70% { box-shadow: 0 0 0 10px rgba(169,113,66,0); } 100% { box-shadow: 0 0 0 0 rgba(169,113,66,0); } }
+        @keyframes radar-pulse-red { 0% { box-shadow: 0 0 0 0 rgba(82,96,109,0.5); } 70% { box-shadow: 0 0 0 10px rgba(82,96,109,0); } 100% { box-shadow: 0 0 0 0 rgba(82,96,109,0); } }
 
-        .leaflet-tooltip.vessel-tooltip { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18); padding: 10px 12px; opacity: 1; }
+        .indicator-sailing { animation: radar-pulse-green 2s infinite; color:var(--teal) !important; }
+        .indicator-discharging { animation: radar-pulse-blue 2s infinite; color:var(--steel) !important; }
+        .indicator-loading { animation: radar-pulse-amber 2s infinite; color:var(--bronze) !important; }
+        .indicator-berthed { animation: radar-pulse-red 2s infinite; color:var(--graphite) !important; }
+
+        .vessel-map-label { background: rgba(255,255,255,0.97); border: 1px solid var(--hairline); border-radius: 6px; padding: 4px 9px; font-size: 11px; font-weight: 700; font-family:'IBM Plex Mono',monospace; white-space: nowrap; box-shadow: 0 6px 14px -4px rgba(11,35,64,0.18); transition: all 0.15s ease; }
+        .label-sailing { color: var(--teal); border-color: rgba(15,110,102,0.4); }
+        .label-discharging { color: var(--steel); border-color: rgba(29,78,137,0.4); }
+        .label-loading { color: var(--bronze); border-color: rgba(169,113,66,0.4); }
+        .label-berthed { color: var(--graphite); border-color: rgba(82,96,109,0.4); }
+
+        .leaflet-tooltip.vessel-tooltip { background: #ffffff; border: 1px solid var(--hairline); border-radius: 10px; box-shadow: 0 14px 30px rgba(11,35,64,0.16); padding: 10px 12px; opacity: 1; font-family:'Inter',sans-serif; }
         .leaflet-tooltip.vessel-tooltip.leaflet-tooltip-top::before { border-top-color: #ffffff; }
         .leaflet-tooltip.vessel-tooltip.leaflet-tooltip-bottom::before { border-bottom-color: #ffffff; }
         .leaflet-tooltip.vessel-tooltip.leaflet-tooltip-left::before { border-left-color: #ffffff; }
         .leaflet-tooltip.vessel-tooltip.leaflet-tooltip-right::before { border-right-color: #ffffff; }
+
+        .report-panel{ border:1px solid var(--hairline); }
+        .accent-rule{ height:3px; background:linear-gradient(90deg, var(--navy) 0%, var(--bronze) 100%); }
+        .kpi-tile{ border:1px solid var(--hairline); background:#fff; }
+        .brand-badge{ letter-spacing:.08em; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans min-h-screen selection:bg-blue-500 selection:text-white">
+<body class="bg-[#F6F7F9] text-slate-800 min-h-screen selection:bg-[#0B2340] selection:text-white">
 
-    <header class="border-b border-slate-200 bg-white/90 backdrop-blur-md sticky top-0 z-[1000] px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-xs">
+    <header class="sticky top-0 z-[1000]">
+      <div class="bg-[#0B2340] px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
-            <div class="flex items-center gap-3">
-                <h1 class="text-xl font-black tracking-tight text-slate-900 flex items-center gap-2">🚢 Fleet Tanker Command Console</h1>
-                <span id="liveTimestampBadge" class="bg-slate-100 text-slate-600 text-[11px] font-mono px-2.5 py-1 rounded-full border border-slate-200">Last Updated: Ready</span>
+            <div class="flex items-center gap-3 flex-wrap">
+                <span class="text-[10px] font-bold brand-badge text-[#C9A66B] border border-[#3A5478] rounded px-2 py-0.5 uppercase">Fleet Operations</span>
+                <h1 class="text-xl font-extrabold tracking-tight text-white">Tanker Fleet Command Console</h1>
+                <span id="liveTimestampBadge" class="bg-[#12315A] text-slate-200 text-[11px] font-mono px-2.5 py-1 rounded-full border border-[#3A5478]">Last Updated: Ready</span>
             </div>
-            <p class="text-xs text-slate-500 mt-0.5">Hierarchical parser enabled: Drop your complex spreadsheet to ingest.</p>
+            <p class="text-xs text-[#9FB2C9] mt-1">Daily coastal tanker tracker — position, cargo &amp; voyage status, ingested directly from the operations spreadsheet.</p>
         </div>
         <div class="w-full md:w-auto">
-            <label class="flex flex-col items-center justify-center border border-dashed border-slate-300 hover:border-blue-500 bg-slate-50 hover:bg-slate-100 px-5 py-2.5 rounded-xl cursor-pointer transition-all text-xs font-semibold text-slate-600 hover:text-slate-900 group">
-                <span class="flex items-center gap-2">📂 <span class="group-hover:text-blue-600 transition-colors">Ingest Production Spreadsheet</span></span>
+            <label class="flex flex-col items-center justify-center border border-dashed border-[#3A5478] hover:border-[#C9A66B] bg-[#12315A] hover:bg-[#173C6C] px-5 py-2.5 rounded-xl cursor-pointer transition-all text-xs font-semibold text-slate-200 hover:text-white group">
+                <span class="flex items-center gap-2"><span class="group-hover:text-[#E8D2AA] transition-colors">Ingest Production Spreadsheet</span></span>
                 <input type="file" id="excelFile" accept=".xlsx, .xls" class="hidden" onchange="handleExcelUpload(event)" />
             </label>
         </div>
+      </div>
+      <div class="accent-rule"></div>
     </header>
 
     <main class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
         <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center relative overflow-hidden group shadow-xs">
-                <div class="absolute inset-y-0 left-0 w-1 bg-blue-500"></div>
+            <div class="kpi-tile p-4 rounded-xl flex justify-between items-center relative overflow-hidden">
+                <div class="absolute inset-y-0 left-0 w-1 bg-[#1D4E89]"></div>
                 <div>
                     <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest font-mono">In Transit MS</p>
-                    <h3 id="msTotal" class="text-2xl font-black text-blue-600 mt-1">0.0 TMT</h3>
+                    <h3 id="msTotal" class="text-2xl font-extrabold text-[#1D4E89] mt-1">0.0 TMT</h3>
                 </div>
             </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center relative overflow-hidden group shadow-xs">
-                <div class="absolute inset-y-0 left-0 w-1 bg-amber-500"></div>
+            <div class="kpi-tile p-4 rounded-xl flex justify-between items-center relative overflow-hidden">
+                <div class="absolute inset-y-0 left-0 w-1 bg-[#A97142]"></div>
                 <div>
                     <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest font-mono">In Transit HSD</p>
-                    <h3 id="hsdTotal" class="text-2xl font-black text-amber-600 mt-1">0.0 TMT</h3>
+                    <h3 id="hsdTotal" class="text-2xl font-extrabold text-[#A97142] mt-1">0.0 TMT</h3>
                 </div>
             </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center relative overflow-hidden group shadow-xs">
-                <div class="absolute inset-y-0 left-0 w-1 bg-emerald-500"></div>
+            <div class="kpi-tile p-4 rounded-xl flex justify-between items-center relative overflow-hidden">
+                <div class="absolute inset-y-0 left-0 w-1 bg-[#0F6E66]"></div>
                 <div>
                     <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest font-mono">Active Fleet</p>
-                    <h3 id="fleetCount" class="text-2xl font-black text-emerald-600 mt-1">0 Vessels</h3>
+                    <h3 id="fleetCount" class="text-2xl font-extrabold text-[#0F6E66] mt-1">0 Vessels</h3>
                 </div>
             </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center relative overflow-hidden group shadow-xs">
-                <div class="absolute inset-y-0 left-0 w-1 bg-indigo-500"></div>
+            <div class="kpi-tile p-4 rounded-xl flex justify-between items-center relative overflow-hidden">
+                <div class="absolute inset-y-0 left-0 w-1 bg-[#0B2340]"></div>
                 <div>
                     <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest font-mono">Operations Breakdown</p>
-                    <h3 id="opsBreakdownCount" class="text-[15px] font-black text-indigo-700 mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
-                        <span>Discharging: <span id="dischCountBadge" class="text-blue-600 font-mono text-base font-black">0</span></span>
-                        <span>Loading: <span id="loadCountBadge" class="text-amber-600 font-mono text-base font-black">0</span></span>
+                    <h3 id="opsBreakdownCount" class="text-[15px] font-extrabold text-[#0B2340] mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                        <span>Discharging: <span id="dischCountBadge" class="text-[#1D4E89] font-mono text-base font-extrabold">0</span></span>
+                        <span>Loading: <span id="loadCountBadge" class="text-[#A97142] font-mono text-base font-extrabold">0</span></span>
                     </h3>
                 </div>
             </div>
         </section>
 
-        <section class="bg-white p-4 rounded-xl border border-slate-200 space-y-3 shadow-xs">
+        <section class="report-panel bg-white p-4 rounded-xl space-y-3">
             <div class="flex items-center justify-between">
-                <h3 class="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Fleet Position Map</h3>
+                <h3 class="text-[10px] text-slate-400 uppercase tracking-wider font-bold font-mono">Fleet Position Map</h3>
                 <button id="labelsToggleBtn" type="button" onclick="toggleMapLabels()"
-                    class="flex items-center gap-2 text-[11px] font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg pl-2.5 pr-3 py-1.5 hover:bg-slate-100 transition-colors">
+                    class="flex items-center gap-2 text-[11px] font-semibold text-[#0B2340] bg-[#F6F7F9] border border-[#E4E8EE] rounded-lg pl-2.5 pr-3 py-1.5 hover:bg-[#EEF1F5] transition-colors">
                     <span id="labelsToggleTrack" class="relative inline-block w-8 h-4 rounded-full bg-slate-300 transition-colors">
                         <span id="labelsToggleDot" class="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform"></span>
                     </span>
                     <span id="labelsToggleText">Show All Details</span>
                 </button>
             </div>
-            <div id="map" class="bg-slate-100 border border-slate-200"></div>
+            <div id="map" class="bg-slate-100 border border-[#E4E8EE]"></div>
+            <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 pt-1 text-[11px] font-mono text-slate-500">
+                <span class="uppercase tracking-wide text-[9px] text-slate-400 font-bold">Status Key</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#0F6E66"></span>Sailing</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#1D4E89"></span>Discharging</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#A97142"></span>Loading</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#52606D"></span>Berthed</span>
+            </div>
         </section>
 
-        <section class="bg-white p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-xs">
+        <section class="report-panel bg-white p-4 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-4">
             <div class="flex flex-wrap items-center gap-3 w-full sm:w-auto">
                 <div class="flex flex-col gap-1 w-full sm:w-48">
                     <label class="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Activity Group Filter</label>
-                    <select id="activityFilter" onchange="processAndRenderData()" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 transition-colors w-full">
+                    <select id="activityFilter" onchange="processAndRenderData()" class="bg-[#F6F7F9] border border-[#E4E8EE] rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#1D4E89] transition-colors w-full">
                         <option value="All">All Activities</option>
                         <option value="Sailing">Sailing / In Transit</option>
                         <option value="Discharging">Discharging</option>
@@ -120,7 +145,7 @@
                 </div>
                 <div class="flex flex-col gap-1 w-full sm:w-48">
                     <label class="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Matrix View Layout</label>
-                    <select id="groupingOption" onchange="processAndRenderData()" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 transition-colors w-full">
+                    <select id="groupingOption" onchange="processAndRenderData()" class="bg-[#F6F7F9] border border-[#E4E8EE] rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#1D4E89] transition-colors w-full">
                         <option value="grouped">Grouped by Fleet Activity Status</option>
                         <option value="flat">Flat List (Alphabetical)</option>
                     </select>
@@ -128,12 +153,19 @@
             </div>
             <div class="w-full sm:w-64 flex flex-col gap-1">
                 <label class="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Search Matrix</label>
-                <input type="text" id="vesselSearch" oninput="processAndRenderData()" placeholder="Filter by vessel..." class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-blue-500 transition-colors placeholder:text-slate-400" />
+                <input type="text" id="vesselSearch" oninput="processAndRenderData()" placeholder="Filter by vessel..." class="bg-[#F6F7F9] border border-[#E4E8EE] rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-[#1D4E89] transition-colors placeholder:text-slate-400" />
             </div>
         </section>
 
         <section id="vesselContainer" class="space-y-6"> </section>
     </main>
+
+    <footer class="max-w-7xl mx-auto px-4 md:px-6 pb-8 pt-2">
+        <div class="border-t border-[#E4E8EE] pt-4 flex flex-col sm:flex-row justify-between gap-2 text-[10px] font-mono text-slate-400 uppercase tracking-wide">
+            <span>Fleet Operations · Tanker Command Console</span>
+            <span>Positions estimated from port-call data — not a live AIS feed</span>
+        </div>
+    </footer>
 
     <script>
         // =====================================================================
@@ -163,7 +195,7 @@
         // (.indicator-sailing/-discharging/-loading/-berthed) so the map stays consistent
         // with the rest of the dashboard.
         const ACTIVITY_COLORS = {
-            'Sailing': '#10b981', 'Discharging': '#3b82f6', 'Loading': '#f59e0b', 'Berthed': '#ef4444'
+            'Sailing': '#0F6E66', 'Discharging': '#1D4E89', 'Loading': '#A97142', 'Berthed': '#52606D'
         };
 
         // =====================================================================
@@ -694,12 +726,22 @@
             let originCoord = null, originName = null, departDate = null, etaDate = null, destName = null;
 
             if (disportLeg) {
-                // Heading to discharge: came from its loading port.
-                originCoord = getCoords(v.loading_port);
-                originName = v.loading_port;
-                departDate = parseFlexibleDate(v.loading_sailed);
-                etaDate = parseFlexibleDate(disportLeg.eta);
-                destName = disportLeg.port;
+                // Current Status can flip to naming the disport ("To Kandla") as soon as
+                // loading wraps up, even though the vessel is still sitting at the loading
+                // port waiting to sail. Only trust "heading to disport" once there's a
+                // confirmed Sailed date -- otherwise it's still at the loading port.
+                const confirmedDeparture = parseFlexibleDate(v.loading_sailed);
+                if (!confirmedDeparture) {
+                    const loadingCoord = getCoords(v.loading_port);
+                    if (loadingCoord) return { coord: loadingCoord, route: null };
+                    destName = disportLeg.port; // no loading-port coordinate either; fall through to the generic fallback below
+                } else {
+                    originCoord = getCoords(v.loading_port);
+                    originName = v.loading_port;
+                    departDate = confirmedDeparture;
+                    etaDate = parseFlexibleDate(disportLeg.eta);
+                    destName = disportLeg.port;
+                }
             } else if (loadingLeg) {
                 // Ballast leg heading to load: came from wherever the remarks say it sailed from.
                 const originInfo = extractOriginFromRemarks(v.remarks);
@@ -811,10 +853,10 @@
             if (route && route.destName) {
                 if (route.fraction !== null) {
                     const pct = Math.round(route.fraction * 100);
-                    html += `<div class="text-emerald-700 font-semibold">En route: ${escapeHtml(route.originName)} → ${escapeHtml(route.destName)}</div>`;
+                    html += `<div class="text-[#0F6E66] font-semibold">En route: ${escapeHtml(route.originName)} → ${escapeHtml(route.destName)}</div>`;
                     html += `<div class="text-slate-400">~${pct}% of the way · ETA ${escapeHtml(formatCellValue(route.etaDate))}</div>`;
                 } else {
-                    html += `<div class="text-emerald-700 font-semibold">Heading to: ${escapeHtml(route.destName)}</div>`;
+                    html += `<div class="text-[#0F6E66] font-semibold">Heading to: ${escapeHtml(route.destName)}</div>`;
                     if (route.etaDate) html += `<div class="text-slate-400">ETA ${escapeHtml(formatCellValue(route.etaDate))}</div>`;
                 }
             }
@@ -1009,7 +1051,7 @@
                 Object.keys(groups).forEach(key => {
                     if (groups[key].length === 0) return;
                     const div = document.createElement('div');
-                    div.innerHTML = `<div class="text-xs font-black uppercase border-b border-slate-200 pb-2 mb-2">${key} Units</div><div class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>`;
+                    div.innerHTML = `<div class="text-xs font-extrabold uppercase tracking-wider text-[#0B2340] border-b border-[#E4E8EE] pb-2 mb-2 font-mono">${key} Units</div><div class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>`;
                     const grid = div.querySelector('.grid');
                     groups[key].forEach(v => grid.appendChild(createCard(v)));
                     container.appendChild(div);
@@ -1042,21 +1084,23 @@
 
         function createCard(v) {
             const div = document.createElement('div');
-            div.className = "vessel-card bg-white p-4 rounded-xl border border-slate-200 shadow-xs";
             const act = normalizeActivity(v.activity);
+            const accent = ACTIVITY_COLORS[act] || '#52606D';
+            div.className = "vessel-card bg-white p-4 rounded-xl border border-[#E4E8EE] relative overflow-hidden";
+            div.style.borderLeft = `3px solid ${accent}`;
 
             div.innerHTML = `
-                <div class="flex justify-between items-start border-b border-slate-100 pb-2 mb-2">
-                    <h3 class="font-bold text-slate-900">${v.vessel}</h3>
-                    <span class="text-[9px] px-2 py-0.5 rounded font-bold uppercase bg-slate-100 indicator-${act.toLowerCase()}">${act}</span>
+                <div class="flex justify-between items-start border-b border-[#EEF1F5] pb-2 mb-2">
+                    <h3 class="font-bold text-[#0B2340]">${v.vessel}</h3>
+                    <span class="text-[9px] px-2 py-0.5 rounded font-bold uppercase bg-[#F6F7F9] indicator-${act.toLowerCase()}">${act}</span>
                 </div>
                 <div class="text-xs space-y-1 text-slate-600">
                     <div>Status: <span class="font-semibold text-slate-900">${v.status || v.disport || 'N/A'}</span></div>
                     <div>Load Port: <span class="font-semibold text-slate-900">${escapeHtml(v.loading_port || 'N/A')}</span></div>
                     ${buildDisportHtmlForCard(v)}
                     <div>MS: ${fmtNum(v.ms_cargo)} TMT | HSD: ${fmtNum(v.hsd_cargo)} TMT</div>
-                    <div class="text-indigo-600 font-bold mt-2">Next: ${v.next_voyage || 'Pending'}</div>
-                    ${v.remarks ? `<div class="mt-2 pt-2 border-t border-red-100 text-red-600 font-medium text-[10px]">⚠️ Remarks: ${v.remarks}</div>` : ''}
+                    <div class="text-[#0B2340] font-bold mt-2">Next: ${v.next_voyage || 'Pending'}</div>
+                    ${v.remarks ? `<div class="mt-2 pt-2 border-t border-[#E7D9CE] text-[#8C3A3A] font-medium text-[10px]">⚠️ Remarks: ${v.remarks}</div>` : ''}
                 </div>
             `;
             return div;
