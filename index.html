@@ -15,8 +15,8 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         :root{
-            --navy:#0B2340; --navy-2:#12315A; --steel:#1D4E89; --teal:#0F6E66;
-            --bronze:#A97142; --graphite:#52606D; --paper:#F6F7F9; --hairline:#E4E8EE;
+            --navy:#0B2340; --navy-2:#12315A; --steel:#2457A8; --teal:#0E8272;
+            --bronze:#C0862C; --graphite:#7A4B66; --paper:#F6F7F9; --hairline:#E4E8EE;
             --burgundy:#8C3A3A;
         }
         html, body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; background:var(--paper); }
@@ -25,10 +25,10 @@
         .vessel-card { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
         .vessel-card:hover { transform: translateY(-2px); box-shadow: 0 12px 20px -6px rgba(11,35,64,0.12), 0 4px 8px -4px rgba(11,35,64,0.08); }
 
-        @keyframes radar-pulse-green { 0% { box-shadow: 0 0 0 0 rgba(15,110,102,0.55); } 70% { box-shadow: 0 0 0 10px rgba(15,110,102,0); } 100% { box-shadow: 0 0 0 0 rgba(15,110,102,0); } }
-        @keyframes radar-pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(29,78,137,0.55); } 70% { box-shadow: 0 0 0 10px rgba(29,78,137,0); } 100% { box-shadow: 0 0 0 0 rgba(29,78,137,0); } }
-        @keyframes radar-pulse-amber { 0% { box-shadow: 0 0 0 0 rgba(169,113,66,0.55); } 70% { box-shadow: 0 0 0 10px rgba(169,113,66,0); } 100% { box-shadow: 0 0 0 0 rgba(169,113,66,0); } }
-        @keyframes radar-pulse-red { 0% { box-shadow: 0 0 0 0 rgba(82,96,109,0.5); } 70% { box-shadow: 0 0 0 10px rgba(82,96,109,0); } 100% { box-shadow: 0 0 0 0 rgba(82,96,109,0); } }
+        @keyframes radar-pulse-green { 0% { box-shadow: 0 0 0 0 rgba(14,130,114,0.55); } 70% { box-shadow: 0 0 0 10px rgba(14,130,114,0); } 100% { box-shadow: 0 0 0 0 rgba(14,130,114,0); } }
+        @keyframes radar-pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(36,87,168,0.55); } 70% { box-shadow: 0 0 0 10px rgba(36,87,168,0); } 100% { box-shadow: 0 0 0 0 rgba(36,87,168,0); } }
+        @keyframes radar-pulse-amber { 0% { box-shadow: 0 0 0 0 rgba(192,134,44,0.55); } 70% { box-shadow: 0 0 0 10px rgba(192,134,44,0); } 100% { box-shadow: 0 0 0 0 rgba(192,134,44,0); } }
+        @keyframes radar-pulse-red { 0% { box-shadow: 0 0 0 0 rgba(122,75,102,0.5); } 70% { box-shadow: 0 0 0 10px rgba(122,75,102,0); } 100% { box-shadow: 0 0 0 0 rgba(122,75,102,0); } }
 
         .indicator-sailing { animation: radar-pulse-green 2s infinite; color:var(--teal) !important; }
         .indicator-discharging { animation: radar-pulse-blue 2s infinite; color:var(--steel) !important; }
@@ -36,10 +36,10 @@
         .indicator-berthed { animation: radar-pulse-red 2s infinite; color:var(--graphite) !important; }
 
         .vessel-map-label { background: rgba(255,255,255,0.97); border: 1px solid var(--hairline); border-radius: 6px; padding: 4px 9px; font-size: 11px; font-weight: 700; font-family:'IBM Plex Mono',monospace; white-space: nowrap; box-shadow: 0 6px 14px -4px rgba(11,35,64,0.18); transition: all 0.15s ease; }
-        .label-sailing { color: var(--teal); border-color: rgba(15,110,102,0.4); }
-        .label-discharging { color: var(--steel); border-color: rgba(29,78,137,0.4); }
-        .label-loading { color: var(--bronze); border-color: rgba(169,113,66,0.4); }
-        .label-berthed { color: var(--graphite); border-color: rgba(82,96,109,0.4); }
+        .label-sailing { color: var(--teal); border-color: rgba(14,130,114,0.45); border-width:1.5px; }
+        .label-discharging { color: var(--steel); border-color: rgba(36,87,168,0.45); border-width:1.5px; }
+        .label-loading { color: var(--bronze); border-color: rgba(192,134,44,0.45); border-width:1.5px; }
+        .label-berthed { color: var(--graphite); border-color: rgba(122,75,102,0.45); border-width:1.5px; }
 
         .leaflet-tooltip.vessel-tooltip { background: #ffffff; border: 1px solid var(--hairline); border-radius: 10px; box-shadow: 0 14px 30px rgba(11,35,64,0.16); padding: 10px 12px; opacity: 1; font-family:'Inter',sans-serif; }
         .leaflet-tooltip.vessel-tooltip.leaflet-tooltip-top::before { border-top-color: #ffffff; }
@@ -51,6 +51,12 @@
         .accent-rule{ height:3px; background:linear-gradient(90deg, var(--navy) 0%, var(--bronze) 100%); }
         .kpi-tile{ border:1px solid var(--hairline); background:#fff; }
         .brand-badge{ letter-spacing:.08em; }
+
+        #mapFullscreenTarget:fullscreen,
+        #mapFullscreenTarget:-webkit-full-screen { background:#fff; padding:20px; display:flex; flex-direction:column; }
+        #mapFullscreenTarget:fullscreen #map,
+        #mapFullscreenTarget:-webkit-full-screen #map { height: calc(100vh - 110px) !important; flex:1; }
+        #mapFullscreenTarget.map-fullscreen-active #map { height: calc(100vh - 110px) !important; }
     </style>
 </head>
 <body class="bg-[#F6F7F9] text-slate-800 min-h-screen selection:bg-[#0B2340] selection:text-white">
@@ -95,7 +101,7 @@
                 <div class="absolute inset-y-0 left-0 w-1 bg-[#0F6E66]"></div>
                 <div>
                     <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest font-mono">Active Fleet</p>
-                    <h3 id="fleetCount" class="text-2xl font-extrabold text-[#0F6E66] mt-1">0 Vessels</h3>
+                    <h3 id="fleetCount" class="text-2xl font-extrabold text-[#0E8272] mt-1">0 Vessels</h3>
                 </div>
             </div>
             <div class="kpi-tile p-4 rounded-xl flex justify-between items-center relative overflow-hidden">
@@ -110,24 +116,31 @@
             </div>
         </section>
 
-        <section class="report-panel bg-white p-4 rounded-xl space-y-3">
-            <div class="flex items-center justify-between">
+        <section class="report-panel bg-white p-4 rounded-xl space-y-3" id="mapFullscreenTarget">
+            <div class="flex items-center justify-between flex-wrap gap-2">
                 <h3 class="text-[10px] text-slate-400 uppercase tracking-wider font-bold font-mono">Fleet Position Map</h3>
-                <button id="labelsToggleBtn" type="button" onclick="toggleMapLabels()"
-                    class="flex items-center gap-2 text-[11px] font-semibold text-[#0B2340] bg-[#F6F7F9] border border-[#E4E8EE] rounded-lg pl-2.5 pr-3 py-1.5 hover:bg-[#EEF1F5] transition-colors">
-                    <span id="labelsToggleTrack" class="relative inline-block w-8 h-4 rounded-full bg-slate-300 transition-colors">
-                        <span id="labelsToggleDot" class="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform"></span>
-                    </span>
-                    <span id="labelsToggleText">Show All Details</span>
-                </button>
+                <div class="flex items-center gap-2">
+                    <button id="mapFullscreenBtn" type="button" onclick="toggleMapFullscreen()"
+                        class="flex items-center gap-1.5 text-[11px] font-semibold text-[#0B2340] bg-[#F6F7F9] border border-[#E4E8EE] rounded-lg px-3 py-1.5 hover:bg-[#EEF1F5] transition-colors">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                        <span id="mapFullscreenText">Full Screen</span>
+                    </button>
+                    <button id="labelsToggleBtn" type="button" onclick="toggleMapLabels()"
+                        class="flex items-center gap-2 text-[11px] font-semibold text-[#0B2340] bg-[#F6F7F9] border border-[#E4E8EE] rounded-lg pl-2.5 pr-3 py-1.5 hover:bg-[#EEF1F5] transition-colors">
+                        <span id="labelsToggleTrack" class="relative inline-block w-8 h-4 rounded-full bg-slate-300 transition-colors">
+                            <span id="labelsToggleDot" class="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform"></span>
+                        </span>
+                        <span id="labelsToggleText">Show All Details</span>
+                    </button>
+                </div>
             </div>
             <div id="map" class="bg-slate-100 border border-[#E4E8EE]"></div>
             <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 pt-1 text-[11px] font-mono text-slate-500">
                 <span class="uppercase tracking-wide text-[9px] text-slate-400 font-bold">Status Key</span>
-                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#0F6E66"></span>Sailing</span>
-                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#1D4E89"></span>Discharging</span>
-                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#A97142"></span>Loading</span>
-                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#52606D"></span>Berthed</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#0E8272"></span>Sailing</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#2457A8"></span>Discharging</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#C0862C"></span>Loading</span>
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full inline-block" style="background:#7A4B66"></span>Berthed</span>
             </div>
         </section>
 
@@ -195,7 +208,7 @@
         // (.indicator-sailing/-discharging/-loading/-berthed) so the map stays consistent
         // with the rest of the dashboard.
         const ACTIVITY_COLORS = {
-            'Sailing': '#0F6E66', 'Discharging': '#1D4E89', 'Loading': '#A97142', 'Berthed': '#52606D'
+            'Sailing': '#0E8272', 'Discharging': '#2457A8', 'Loading': '#C0862C', 'Berthed': '#7A4B66'
         };
 
         // =====================================================================
@@ -625,6 +638,28 @@
             return !!(leg && (leg.nor || leg.allFast || leg.etc || leg.sailed));
         }
 
+        // When a vessel is at rest (not actively sailing/interpolating), figure out plainly
+        // WHERE that is and whether it's the load port or the disport -- "Berthed" alone
+        // doesn't say which, and that's the #1 point of confusion when screenshotting the
+        // map for people who don't have the spreadsheet open next to it.
+        function locateVessel(v) {
+            const rawStatus = String(v.status || '').replace(/^to\s+/i, '').trim();
+            const portName = rawStatus || v.disport || v.loading_port || 'Unknown location';
+            const statusCoord = getCoords(v.status);
+
+            const loadMatch = (v.loading_legs || []).some(leg => coordsEqual(getCoords(leg.port), statusCoord))
+                || (v.loading_port && coordsEqual(getCoords(v.loading_port), statusCoord));
+            const disMatch = (v.disport_legs || []).some(leg => coordsEqual(getCoords(leg.port), statusCoord))
+                || (v.disport && coordsEqual(getCoords(v.disport), statusCoord));
+
+            let tag = null;
+            if (loadMatch && disMatch) tag = 'Load Port & Disport';
+            else if (loadMatch) tag = 'Load Port';
+            else if (disMatch) tag = 'Disport';
+
+            return { portName, tag };
+        }
+
         // A straight line between two ports on OPPOSITE coasts of the Indian peninsula
         // (e.g. Haldia to Kochi) cuts directly across the landmass -- physically impossible
         // for a ship. These waypoints trace the coastline from Gujarat down around the
@@ -853,21 +888,33 @@
             if (route && route.destName) {
                 if (route.fraction !== null) {
                     const pct = Math.round(route.fraction * 100);
-                    html += `<div class="text-[#0F6E66] font-semibold">En route: ${escapeHtml(route.originName)} → ${escapeHtml(route.destName)}</div>`;
+                    html += `<div class="text-[#0E8272] font-semibold">En route: ${escapeHtml(route.originName)} → ${escapeHtml(route.destName)}</div>`;
                     html += `<div class="text-slate-400">~${pct}% of the way · ETA ${escapeHtml(formatCellValue(route.etaDate))}</div>`;
                 } else {
-                    html += `<div class="text-[#0F6E66] font-semibold">Heading to: ${escapeHtml(route.destName)}</div>`;
+                    html += `<div class="text-[#0E8272] font-semibold">Heading to: ${escapeHtml(route.destName)}</div>`;
                     if (route.etaDate) html += `<div class="text-slate-400">ETA ${escapeHtml(formatCellValue(route.etaDate))}</div>`;
                 }
+            } else if (!route) {
+                const loc = locateVessel(v);
+                html += `<div class="text-[#0B2340] font-bold text-[12px] bg-[#F6F7F9] border border-[#E4E8EE] rounded px-2 py-1 mb-0.5">`
+                    + `Currently at: ${escapeHtml(loc.portName)}`
+                    + (loc.tag ? `<span class="block text-[10px] font-semibold text-slate-500 mt-0.5">${escapeHtml(loc.tag)}</span>` : '')
+                    + `</div>`;
             }
+            const statusCoord = !route ? getCoords(v.status) : null;
 
             html += `<div class="font-semibold text-slate-400 text-[9px] uppercase tracking-wide pt-1">Loading Plan</div>`;
             const loadingLegs = (v.loading_legs && v.loading_legs.length) ? v.loading_legs
                 : [{ port: v.loading_port || 'N/A', ms: null, hsd: null, eta: '' }];
             loadingLegs.forEach(leg => {
                 const qty = (leg.ms === null) ? '' : ` — MS ${fmtNum(leg.ms)} / HSD ${fmtNum(leg.hsd)} TMT`;
-                const etaText = leg.eta ? ` · ETA ${escapeHtml(leg.eta)}` : '';
-                html += `<div class="pl-1">• <b class="text-slate-800">${escapeHtml(leg.port || 'N/A')}</b>${qty}${etaText}</div>`;
+                const reached = legReached(leg);
+                // A future-tense "ETA" on a leg the vessel has already reached (NOR/All Fast/ETC
+                // on file) reads as if it's still approaching -- relabel it plainly instead.
+                const etaText = leg.eta ? ` · ${reached ? 'Arrived' : 'ETA'} ${escapeHtml(leg.eta)}` : '';
+                const isHere = statusCoord && coordsEqual(getCoords(leg.port), statusCoord);
+                const badge = isHere ? ` <span class="text-[9px] text-[#0E8272] font-bold">● HERE</span>` : '';
+                html += `<div class="pl-1">• <b class="text-slate-800">${escapeHtml(leg.port || 'N/A')}</b>${qty}${etaText}${badge}</div>`;
             });
 
             const disportLegs = (v.disport_legs && v.disport_legs.length) ? v.disport_legs
@@ -875,7 +922,9 @@
             html += `<div class="font-semibold text-slate-400 text-[9px] uppercase tracking-wide pt-1">${disportLegs.length > 1 ? 'Disports' : 'Disport'}</div>`;
             disportLegs.forEach(leg => {
                 const qty = (leg.ms === null) ? '' : ` — MS ${fmtNum(leg.ms)} / HSD ${fmtNum(leg.hsd)} TMT`;
-                html += `<div class="pl-1">• <b class="text-slate-800">${escapeHtml(leg.port || 'N/A')}</b>${qty}</div>`;
+                const isHere = statusCoord && coordsEqual(getCoords(leg.port), statusCoord);
+                const badge = isHere ? ` <span class="text-[9px] text-[#0E8272] font-bold">● HERE</span>` : '';
+                html += `<div class="pl-1">• <b class="text-slate-800">${escapeHtml(leg.port || 'N/A')}</b>${qty}${badge}</div>`;
             });
 
             html += `</div></div>`;
@@ -888,10 +937,11 @@
             const act = normalizeActivity(v.activity);
             const route = est && est.route;
             let where;
-            if (act === 'Sailing' && route && route.destName) {
+            if (route && route.destName) {
                 where = (route.fraction !== null ? 'En route to ' : 'Heading to ') + route.destName;
             } else {
-                where = v.status || v.disport || act;
+                const loc = locateVessel(v);
+                where = 'At ' + loc.portName + (loc.tag ? ' (' + loc.tag + ')' : '');
             }
             const cargo = `MS ${fmtNum(v.ms_cargo)} / HSD ${fmtNum(v.hsd_cargo)}`;
             return `${v.vessel} · ${where} · ${cargo}`;
@@ -917,6 +967,31 @@
             }
             processAndRenderData();
         }
+
+        // =====================================================================
+        // MAP FULL SCREEN (for clean management screenshots)
+        // =====================================================================
+        function toggleMapFullscreen() {
+            const el = document.getElementById('mapFullscreenTarget');
+            const isActive = document.fullscreenElement || document.webkitFullscreenElement;
+            if (!isActive) {
+                const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+                if (req) req.call(el);
+            } else {
+                const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+                if (exit) exit.call(document);
+            }
+        }
+        function handleMapFullscreenChange() {
+            const el = document.getElementById('mapFullscreenTarget');
+            const btnText = document.getElementById('mapFullscreenText');
+            const active = (document.fullscreenElement === el) || (document.webkitFullscreenElement === el);
+            if (el) el.classList.toggle('map-fullscreen-active', !!active);
+            if (btnText) btnText.textContent = active ? 'Exit Full Screen' : 'Full Screen';
+            setTimeout(() => { if (map) map.invalidateSize(); }, 260);
+        }
+        document.addEventListener('fullscreenchange', handleMapFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleMapFullscreenChange);
 
         // =====================================================================
         // EXCEL INGEST
@@ -1025,7 +1100,7 @@
                 placed.forEach(({ vessel: v, est, coord, labelIndex }) => {
                     const act = normalizeActivity(v.activity);
                     const bearing = (est.route && est.route.fraction !== null) ? est.route.bearing : undefined;
-                    const baseOffset = -22 - (labelIndex || 0) * 24; // stagger labels of nearby vessels so they don't overlap
+                    const baseOffset = -26 - (labelIndex || 0) * 32; // stagger labels of nearby vessels so they don't overlap
 
                     const marker = L.marker(coord, { icon: buildTankerIcon(act, bearing) }).addTo(markerLayerGroup);
                     if (permanentLabels) {
@@ -1085,7 +1160,8 @@
         function createCard(v) {
             const div = document.createElement('div');
             const act = normalizeActivity(v.activity);
-            const accent = ACTIVITY_COLORS[act] || '#52606D';
+            const accent = ACTIVITY_COLORS[act] || '#7A4B66';
+            const loc = locateVessel(v);
             div.className = "vessel-card bg-white p-4 rounded-xl border border-[#E4E8EE] relative overflow-hidden";
             div.style.borderLeft = `3px solid ${accent}`;
 
@@ -1095,7 +1171,7 @@
                     <span class="text-[9px] px-2 py-0.5 rounded font-bold uppercase bg-[#F6F7F9] indicator-${act.toLowerCase()}">${act}</span>
                 </div>
                 <div class="text-xs space-y-1 text-slate-600">
-                    <div>Status: <span class="font-semibold text-slate-900">${v.status || v.disport || 'N/A'}</span></div>
+                    <div>Status: <span class="font-semibold text-slate-900">${v.status || v.disport || 'N/A'}</span>${loc.tag ? ` <span class="text-[9px] font-bold uppercase tracking-wide text-slate-400">· ${escapeHtml(loc.tag)}</span>` : ''}</div>
                     <div>Load Port: <span class="font-semibold text-slate-900">${escapeHtml(v.loading_port || 'N/A')}</span></div>
                     ${buildDisportHtmlForCard(v)}
                     <div>MS: ${fmtNum(v.ms_cargo)} TMT | HSD: ${fmtNum(v.hsd_cargo)} TMT</div>
